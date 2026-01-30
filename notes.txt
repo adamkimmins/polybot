@@ -1,0 +1,20 @@
+Setup:
+**T1 CMD- 
+CD backend/worker/polybot
+wrangler dev --ip 0.0.0.0
+
+**T2 CMD-
+CD apps/polybot-mobile
+npm start
+
+Test index.js 01/28:
+**T3 PS-
+*Talk:
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8787/talk `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body '{"userText":"hello polybot"}'
+
+*Ping:
+Invoke-RestMethod http://127.0.0.1:8787/ping

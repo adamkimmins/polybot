@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Env / secrets (anywhere)
+.env
+.env.*
+!.env.example
+
+# Cloudflare / Wrangler (anywhere)
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+coverage/

@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "expo-audio": "~1.1.1",
+    "expo-av": "^16.0.8",
+    "expo-crypto": "^15.0.8",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260130.0"
+  }
+}
