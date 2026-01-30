@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "polybot-mobile",
-    "slug": "polybot-mobile",
+    "name": "client",
+    "slug": "client",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

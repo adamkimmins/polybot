@@ -1,10 +1,10 @@
-Setup:
+Fast Setup:
 **T1 CMD- 
-CD backend/worker/polybot
+CD services/chat
 wrangler dev --ip 0.0.0.0
 
 **T2 CMD-
-CD apps/polybot-mobile
+CD apps/client
 npm start
 
 Test index.js 01/28:
