@@ -158,6 +158,49 @@ export default {
       }
     }
 
+    //new xtts version
+    if (url.pathname === "/tts_xtts" && req.method === "POST") {
+      let body: any;
+      try {
+        body = await req.json();
+      } catch (e) {
+        return json({ error: "Invalid JSON", details: String(e) }, 400);
+      }
+
+      const { text, language = "en", chunkSize = 20 } = body ?? {};
+      if (!text) return json({ error: "text is required" }, 400);
+
+      // Local dev: XTTS server you ran via docker
+      // In prod, this would be a real URL to wherever you host it.
+      const XTTS_URL = "http://127.0.0.1:8000";
+
+      const upstream = await fetch(`${XTTS_URL}/tts_stream`, {
+        method: "POST",
+        headers: {
+          // the xtts streaming server expects these headers in common setups
+          text: String(text),
+          language: String(language),
+          add_wav_header: "True",
+          stream_chunk_size: String(chunkSize),
+        },
+      });
+
+      if (!upstream.ok || !upstream.body) {
+        const err = await upstream.text().catch(() => "");
+        return json({ error: "XTTS upstream failed", status: upstream.status, details: err }, 502);
+      }
+
+      // Stream passthrough (wav)
+      return new Response(upstream.body, {
+        headers: {
+          ...corsHeaders(),
+          "Content-Type": upstream.headers.get("content-type") ?? "audio/wav",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+    //end xtts
+
     if (url.pathname === "/teach" && req.method === "POST") {
       let body: any;
       try {
