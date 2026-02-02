@@ -172,7 +172,7 @@ export default {
 
       // Local dev: XTTS server via python -m xtts.server
       // from .dev.vars
-      const XTTS_URL = env.XTTS_URL ?? "http://192.168.68.50:8000";
+      const XTTS_URL = env.XTTS_URL ?? "http://localhost:8000";
 
 
       const upstream = await fetch(`${XTTS_URL}/tts_stream`, {
