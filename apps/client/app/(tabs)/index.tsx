@@ -45,12 +45,12 @@ export default function HomeScreen() {
 
   // warm up ping
   useEffect(() => {
-    fetch(`${API_URL}/ping`).catch(() => {});
+    fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
 
   // audio mode setup
   useEffect(() => {
-    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -59,6 +59,94 @@ export default function HomeScreen() {
     else setSendPhase("idle");
   }, [input, loading, isStreaming]);
 
+
+  const ttsQueueRef = useRef<string[]>([]);
+  const ttsPlayingRef = useRef(false);
+
+  useEffect(() => {
+    // When native playback ends, trigger next queued chunk
+    const sub = ttsPlayer.addListener("playbackStatusUpdate", (status: any) => {
+      if (status?.didJustFinish) {
+        ttsPlayingRef.current = false;
+        void pumpTtsQueue();
+      }
+    });
+
+    return () => sub.remove?.();
+  }, [ttsPlayer]);
+
+const enqueueTts = (chunk: string) => {
+  const cleaned = chunk
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Reject empty or punctuation-only chunks
+  if (!cleaned) return;
+  if (!/[A-Za-z0-9]/.test(cleaned)) return;
+
+  ttsQueueRef.current.push(cleaned);
+  void pumpTtsQueue();
+};
+
+
+  const pumpTtsQueue = async () => {
+    if (ttsPlayingRef.current) return;
+    const next = ttsQueueRef.current.shift();
+    if (!next) return;
+
+    ttsPlayingRef.current = true;
+
+    try {
+      // Your XTTS proxy endpoint
+      const ttsResp = await fetch(`${API_URL}/tts_xtts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: next, language: "en", chunkSize: 20 })
+      });
+
+      if (!ttsResp.ok) {
+        console.error("XTTS failed:", await ttsResp.text());
+        ttsPlayingRef.current = false;
+        return;
+      }
+
+      const ab = await ttsResp.arrayBuffer();
+      const contentType = ttsResp.headers.get("content-type") ?? "";
+      const isWav = contentType.includes("wav");
+      const ext = isWav ? "wav" : "mp3";
+      const mime = isWav ? "audio/wav" : "audio/mpeg";
+
+      if (Platform.OS === "web") {
+        const blob = new Blob([ab], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const audioEl = new Audio(url);
+        audioEl.onended = () => {
+          URL.revokeObjectURL(url);
+          ttsPlayingRef.current = false;
+          void pumpTtsQueue();
+        };
+        await audioEl.play();
+      } else {
+        const base64 = Buffer.from(new Uint8Array(ab)).toString("base64");
+        const uri = `${FileSystem.cacheDirectory}tts-${Date.now()}.${ext}`;
+
+        await FileSystem.writeAsStringAsync(uri, base64, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+
+        ttsPlayer.replace({ uri });
+        ttsPlayer.seekTo(0);
+        ttsPlayer.play();
+        // Next chunk will be triggered by playbackStatusUpdate.didJustFinish
+      }
+    } catch (e) {
+      console.error("pumpTtsQueue error:", e);
+      ttsPlayingRef.current = false;
+    }
+  };
+
+
+
   const stopStreaming = () => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -66,6 +154,11 @@ export default function HomeScreen() {
     setIsStreaming(false);
     setLoading(false);
     setTimeout(() => setShowTalk(false), 800);
+
+    ttsQueueRef.current = [];
+    ttsPlayingRef.current = false;
+    ttsPlayer.pause?.();
+
   };
 
   const sendMessage = async () => {
@@ -73,6 +166,9 @@ export default function HomeScreen() {
     if (!text || loading) return;
 
     setMessages(prev => [...prev, { id: makeId(), role: "user", content: text }]);
+
+    let fullText = "";
+    let speechBuffer = "";
 
     setInput("");
     setLoading(true);
@@ -96,12 +192,14 @@ export default function HomeScreen() {
       }
 
       const decoder = new TextDecoder();
-      let fullText = "";
+      // let fullText = "";
 
       const consumeSSEText = (raw: string) => {
         const events = raw.split(/\r?\n\r?\n/);
+
         for (const evt of events) {
           const lines = evt.split(/\r?\n/);
+
           for (const line of lines) {
             if (!line.startsWith("data:")) continue;
 
@@ -110,10 +208,31 @@ export default function HomeScreen() {
 
             try {
               const parsed = JSON.parse(payload);
-              const token = parsed?.response;
-              if (token) {
-                fullText += token;
-                setStreamedTalk(prev => prev + token);
+              const token: string | undefined = parsed?.response;
+              if (!token) continue;
+
+              // Existing behavior
+              fullText += token;
+              setStreamedTalk(prev => prev + token);
+
+              // NEW: sentence-chunk TTS
+              speechBuffer += token;
+
+              // Pull out complete sentences/newlines from speechBuffer
+              while (true) {
+                // sentence ends with . ! ? or newline
+                const match = speechBuffer.match(
+                  /^[\s\S]*?[.!?](?:\s+|$)|^[\s\S]*?\n/
+                );
+                if (!match) break;
+
+                const chunk = match[0];
+                speechBuffer = speechBuffer.slice(chunk.length);
+
+                // avoid tiny junk chunks
+                if (chunk.trim().length >= 8) {
+                  enqueueTts(chunk);
+                }
               }
             } catch {
               // ignore
@@ -121,6 +240,7 @@ export default function HomeScreen() {
           }
         }
       };
+
 
       setIsStreaming(true);
 
@@ -149,45 +269,52 @@ export default function HomeScreen() {
         consumeSSEText(raw);
       }
 
+      // Flush any leftover partial text at the end
+if (speechBuffer.trim().length > 0) {
+  enqueueTts(speechBuffer);
+  speechBuffer = "";
+}
+
+
       setIsStreaming(false);
       setTalk(fullText);
       const talkText = fullText;
 
       // TTS
-      try {
-        const ttsResp = await fetch(`${API_URL}/tts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: talkText })
-        });
+      // try {
+      //   const ttsResp = await fetch(`${API_URL}/tts`, {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({ text: talkText })
+      //   });
 
-        if (!ttsResp.ok) {
-          console.error("TTS failed:", await ttsResp.text());
-        } else {
-          const ab = await ttsResp.arrayBuffer();
+      //   if (!ttsResp.ok) {
+      //     console.error("TTS failed:", await ttsResp.text());
+      //   } else {
+      //     const ab = await ttsResp.arrayBuffer();
 
-          if (Platform.OS === "web") {
-            const blob = new Blob([ab], { type: "audio/mpeg" });
-            const url = URL.createObjectURL(blob);
-            const audioEl = new Audio(url);
-            audioEl.onended = () => URL.revokeObjectURL(url);
-            await audioEl.play();
-          } else {
-            const base64 = Buffer.from(new Uint8Array(ab)).toString("base64");
-            const uri = `${FileSystem.cacheDirectory}tts-${Date.now()}.mp3`;
+      //     if (Platform.OS === "web") {
+      //       const blob = new Blob([ab], { type: "audio/mpeg" });
+      //       const url = URL.createObjectURL(blob);
+      //       const audioEl = new Audio(url);
+      //       audioEl.onended = () => URL.revokeObjectURL(url);
+      //       await audioEl.play();
+      //     } else {
+      //       const base64 = Buffer.from(new Uint8Array(ab)).toString("base64");
+      //       const uri = `${FileSystem.cacheDirectory}tts-${Date.now()}.mp3`;
 
-            await FileSystem.writeAsStringAsync(uri, base64, {
-              encoding: FileSystem.EncodingType.Base64
-            });
+      //       await FileSystem.writeAsStringAsync(uri, base64, {
+      //         encoding: FileSystem.EncodingType.Base64
+      //       });
 
-            ttsPlayer.replace({ uri });
-            ttsPlayer.seekTo(0);
-            ttsPlayer.play();
-          }
-        }
-      } catch (e) {
-        console.error("TTS client error:", e);
-      }
+      //       ttsPlayer.replace({ uri });
+      //       ttsPlayer.seekTo(0);
+      //       ttsPlayer.play();
+      //     }
+      //   }
+      // } catch (e) {
+      //   console.error("TTS client error:", e);
+      // }
 
       // Teach
       const teachResp = await fetch(`${API_URL}/teach`, {

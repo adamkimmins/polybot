@@ -170,9 +170,10 @@ export default {
       const { text, language = "en", chunkSize = 20 } = body ?? {};
       if (!text) return json({ error: "text is required" }, 400);
 
-      // Local dev: XTTS server you ran via docker
-      // In prod, this would be a real URL to wherever you host it.
-      const XTTS_URL = "http://127.0.0.1:8000";
+      // Local dev: XTTS server via python -m xtts.server
+      // from .dev.vars
+      const XTTS_URL = env.XTTS_URL ?? "http://192.168.68.50:8000";
+
 
       const upstream = await fetch(`${XTTS_URL}/tts_stream`, {
         method: "POST",
