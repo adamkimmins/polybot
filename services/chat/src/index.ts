@@ -1,4 +1,7 @@
 import type { Env } from "./env";
+import { TALK_SYSTEM_EN } from "./prompts/talk.en";
+import { TALK_SYSTEM_IT } from "./prompts/talk.it";
+
 
 // MUST be exported from entrypoint
 export { SessionDO } from "./session-do";
@@ -23,7 +26,11 @@ export default {
         return json({ error: "Invalid JSON" }, 400);
       }
 
-      const { userText, sessionId } = body ?? {};
+
+      const { userText, sessionId, lang } = body ?? {};
+      const L: "en" | "it" = lang === "it" ? "it" : "en";
+      const talkPrompt = L === "it" ? TALK_SYSTEM_IT : TALK_SYSTEM_EN;
+
       if (!userText || !sessionId) {
         return json({ error: "userText and sessionId are required" }, 400);
       }
@@ -37,13 +44,9 @@ export default {
         body: JSON.stringify({ role: "user", content: userText })
       });
 
-      const aiStream = await env.AI.run("@cf/mistral/mistral-7b-instruct-v0.1", {
+      const aiStream = await env.AI.run(env.TALK_MODEL ?? "@cf/mistral/mistral-7b-instruct-v0.1", {
         messages: [
-          {
-            role: "system",
-            content:
-              "You are Polybot, a conversational AI. Respond naturally. Do not explain. Keep responses very short if you can, shorter is better."
-          },
+          { role: "system", content: talkPrompt },
           { role: "user", content: userText }
         ],
         stream: true
@@ -58,6 +61,23 @@ export default {
           const encoder = new TextEncoder();
 
           let sseBuffer = "";
+
+          let suppress = false;
+
+          const stripParentheticals = (tok: string) => {
+            let out = "";
+            for (const ch of tok) {
+              if (ch === "(" || ch === "[") { suppress = true; continue; }
+              if (ch === ")" || ch === "]") { suppress = false; continue; }
+
+              // safety: if model forgets to close, reset on newline
+              if (ch === "\n") { suppress = false; out += ch; continue; }
+
+              if (!suppress) out += ch;
+            }
+            return out;
+          };
+
 
           try {
             while (true) {
@@ -87,9 +107,12 @@ export default {
 
                 if (!token) continue;
 
-                fullText += token;
+                const cleaned = stripParentheticals(token);
+                if (!cleaned) continue;
+
+                fullText += cleaned;
                 controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ response: token })}\n\n`)
+                  encoder.encode(`data: ${JSON.stringify({ response: cleaned })}\n\n`)
                 );
               }
             }
@@ -119,6 +142,7 @@ export default {
       });
     }
 
+    //OLD fallback method using Cloudflares built in TTS
     if (url.pathname === "/tts" && req.method === "POST") {
       let body: any;
       try {
@@ -158,7 +182,7 @@ export default {
       }
     }
 
-    //new xtts version
+    //NEW xtts version
     if (url.pathname === "/tts_xtts" && req.method === "POST") {
       let body: any;
       try {
@@ -167,7 +191,10 @@ export default {
         return json({ error: "Invalid JSON", details: String(e) }, 400);
       }
 
-      const { text, language = "en", chunkSize = 20, voice = "adam" } = body ?? {};
+      const DEFAULT_TTS_LANG = env.DEFAULT_TTS_LANG ?? "en";
+      const DEFAULT_VOICE = env.DEFAULT_VOICE ?? "adam";
+      const { text, language = DEFAULT_TTS_LANG, chunkSize = 20, voice = DEFAULT_VOICE } = body ?? {};
+
       if (!text) return json({ error: "text is required" }, 400);
 
       // Local dev: XTTS server via python -m xtts.server
@@ -181,7 +208,7 @@ export default {
           // the xtts streaming server expects these headers in common setups
           text: String(text),
           language: String(language),
-          voice: String(voice ?? "adam"),
+          voice: String(voice),
           add_wav_header: "True",
           stream_chunk_size: String(chunkSize),
         },

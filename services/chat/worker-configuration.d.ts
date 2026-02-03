@@ -27,6 +27,11 @@ MERCHANTABLITY OR NON-INFRINGEMENT.
 See the Apache Version 2.0 License for specific language governing permissions
 and limitations under the License.
 ***************************************************************************** */
+declare module "*.txt" {
+  const content: string;
+  export default content;
+}
+
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;

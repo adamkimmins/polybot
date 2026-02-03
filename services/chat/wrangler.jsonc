@@ -23,14 +23,12 @@
 			]
 		}
 	],
-	
-	  "ai": {
+	"ai": {
 		"binding": "AI"
 	},
-
 	"observability": {
 		"enabled": true
-	}
+	},
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

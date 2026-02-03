@@ -16,7 +16,10 @@ import {
   Platform,
   Pressable
 } from "react-native";
-import { hide } from "expo-router/build/utils/splash";
+
+import { useSettings } from "@/components/settings";
+import { Stack, useRouter } from "expo-router";
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8787";
 const SESSION_ID = process.env.EXPO_PUBLIC_SESSION_ID ?? "local-dev-session";
@@ -35,6 +38,11 @@ export default function HomeScreen() {
   const [talk, setTalk] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const { settings } = useSettings();
+  const { learnLang, voiceId } = settings;
+  const router = useRouter();
+
 
   const [streamedTalk, setStreamedTalk] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -64,7 +72,7 @@ export default function HomeScreen() {
     fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
 
-  
+
 
   // audio mode setup
   useEffect(() => {
@@ -136,7 +144,7 @@ export default function HomeScreen() {
     const ttsResp = await fetch(`${API_URL}/tts_xtts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language: "en", chunkSize: 20, voice: "adam"})
+      body: JSON.stringify({ text, language: learnLang, chunkSize: 20, voice: voiceId})
     });
 
     if (!ttsResp.ok) {
@@ -239,7 +247,7 @@ export default function HomeScreen() {
       const res = await fetch(`${API_URL}/talk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: SESSION_ID, userText: text }),
+        body: JSON.stringify({ sessionId: SESSION_ID, userText: text, lang: learnLang }),
         signal: abortRef.current.signal
       });
 
@@ -402,9 +410,20 @@ export default function HomeScreen() {
           />
 
         {/* settings button */}
-        <Pressable style={styles.settingsButton}>
+        {/* <Pressable style={styles.settingsButton}>
+          <MaterialIcons name="settings" size={32} color="#000000" />
+        </Pressable> */}
+    <Stack> 
+<Stack.Screen name="settings" options={{ presentation: "modal", headerShown: true, title: "Settings" }} />
+          </Stack>
+
+        <Pressable style={styles.settingsButton} onPress={() => router.push("/settings")}>
           <MaterialIcons name="settings" size={32} color="#000000" />
         </Pressable>
+
+
+      
+
       </View>
 
       {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
@@ -452,7 +471,8 @@ export default function HomeScreen() {
             style={[
               styles.segmentBtn,
               styles.segmentMiddle,
-              hintMode === "hint" && styles.segmentBtnActive, Platform.OS === "web" && styles.segmentMiddleWeb
+              hintMode === "hint" && styles.segmentBtnActive, 
+              Platform.OS === "web" && styles.segmentMiddleWeb
             ]}
           >
             <Text style={[styles.segmentText, hintMode === "hint" && styles.segmentTextActive]}>
@@ -465,7 +485,8 @@ export default function HomeScreen() {
             style={[
               styles.segmentBtn,
               styles.segmentRight,
-              hintMode === "tutor" && styles.segmentBtnActive
+              hintMode === "tutor" && styles.segmentBtnActive,
+              Platform.OS === "web" && styles.segmentRightWed
             ]}
           >
             <Text style={[styles.segmentText, hintMode === "tutor" && styles.segmentTextActive]}>
@@ -562,7 +583,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderRightWidth: 1
   },
-  segmentRight: {},
+  segmentRight: {marginLeft: -2},
   segmentBtnActive: {
     backgroundColor: "#001d34"
   },
@@ -704,5 +725,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderLeftWidth: 0,
     borderRightWidth: 0
+  },
+  segmentRightWed: {
+  marginLeft: 0
   }
 });

@@ -25,7 +25,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Talk',
+          title: 'Chat',
           tabBarIcon: ({ color }) =>
             isApplePlatform ? (
               <IconSymbol

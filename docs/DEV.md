@@ -50,7 +50,7 @@ cd apps/client
 npm start
 
 Terminal 3 – XTTS:
-cd services/chat/tts
+cd services/tts
 .\.venv\Scripts\Activate.ps1
 
 uvicorn server:app --host 0.0.0.0 --port 8000
