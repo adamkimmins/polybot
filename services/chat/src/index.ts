@@ -167,7 +167,7 @@ export default {
         return json({ error: "Invalid JSON", details: String(e) }, 400);
       }
 
-      const { text, language = "en", chunkSize = 20 } = body ?? {};
+      const { text, language = "en", chunkSize = 20, voice = "adam" } = body ?? {};
       if (!text) return json({ error: "text is required" }, 400);
 
       // Local dev: XTTS server via python -m xtts.server
@@ -181,6 +181,7 @@ export default {
           // the xtts streaming server expects these headers in common setups
           text: String(text),
           language: String(language),
+          voice: String(voice ?? "adam"),
           add_wav_header: "True",
           stream_chunk_size: String(chunkSize),
         },

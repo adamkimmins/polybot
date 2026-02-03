@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
+  Image,
+  Keyboard,
   TextInput,
   StyleSheet,
   KeyboardAvoidingView,
@@ -14,6 +16,7 @@ import {
   Platform,
   Pressable
 } from "react-native";
+import { hide } from "expo-router/build/utils/splash";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8787";
 const SESSION_ID = process.env.EXPO_PUBLIC_SESSION_ID ?? "local-dev-session";
@@ -42,6 +45,11 @@ export default function HomeScreen() {
 
   const ttsPlayer = useAudioPlayer();
 
+  //tutor/teach bar
+  type hintMode = "off" | "hint" | "tutor";
+  const [hintMode, sethintMode] = useState<hintMode>("tutor");
+
+
   // TTS queueing system
   const textQueueRef = useRef<string[]>([]);
   const inFlightRef = useRef(0);
@@ -56,6 +64,8 @@ export default function HomeScreen() {
     fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
 
+  
+
   // audio mode setup
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => { });
@@ -69,13 +79,30 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const sub = ttsPlayer.addListener("playbackStatusUpdate", (status: any) => {
-      if (status?.didJustFinish) {
+      // The field names vary a bit across expo versions, so check a few patterns
+      const didJustFinish = status?.didJustFinish === true;
+
+      const isLoaded = status?.isLoaded ?? true; // some builds omit it
+      const isPlaying = status?.isPlaying === true;
+
+      const position = status?.positionMillis ?? status?.position ?? 0;
+      const duration = status?.durationMillis ?? status?.duration ?? 0;
+
+      const endedByPosition =
+        isLoaded &&
+        !isPlaying &&
+        duration > 0 &&
+        position >= duration - 150; // small tolerance
+
+      if (didJustFinish || endedByPosition) {
         playingRef.current = false;
         void pumpPlayback();
       }
     });
+
     return () => sub.remove?.();
   }, [ttsPlayer]);
+
 
 
   const enqueueTtsChunk = (chunk: string) => {
@@ -109,7 +136,7 @@ export default function HomeScreen() {
     const ttsResp = await fetch(`${API_URL}/tts_xtts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language: "en", chunkSize: 20 })
+      body: JSON.stringify({ text, language: "en", chunkSize: 20, voice: "adam"})
     });
 
     if (!ttsResp.ok) {
@@ -203,6 +230,8 @@ export default function HomeScreen() {
     setTalk("");
     setStreamedTalk("");
     setShowTalk(true);
+    Keyboard.dismiss();
+
 
     try {
       abortRef.current = new AbortController();
@@ -319,17 +348,30 @@ export default function HomeScreen() {
       const talkText = fullText;
 
       // Teach
-      const teachResp = await fetch(`${API_URL}/teach`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText: text, talkText })
-      });
-      const teachJson = await teachResp.json();
+      if (hintMode !== "off") {
+        const teachResp = await fetch(`${API_URL}/teach`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userText: text,
+            talkText,
+            mode: hintMode === "hint" ? "translate" : "tutor"
+          })
+        });
 
-      setMessages(prev => [
-        ...prev,
-        { id: makeId(), role: "assistant", content: talkText, teach: teachJson.teach }
-      ]);
+        const teachJson = await teachResp.json();
+
+        setMessages(prev => [
+          ...prev,
+          { id: makeId(), role: "assistant", content: talkText, teach: teachJson.teach }
+        ]);
+      } else {
+        setMessages(prev => [
+          ...prev,
+          { id: makeId(), role: "assistant", content: talkText }
+        ]);
+      }
+
     } catch (e: any) {
       if (e?.name === "AbortError") {
         // user pressed stop; don't show network error
@@ -346,23 +388,38 @@ export default function HomeScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, Platform.OS === "web" && { paddingTop: 20, paddingBottom: 0 }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.topBar}>
-        <Text style={styles.logo}>Polybot</Text>
+
+        {/* Name */}
+        {/* <Text style={styles.logo}>Polybot</Text> */}
+   
+           <Image
+                  source={require('@/assets/images/SmallPolybotLogoLIGHT.png')}
+                  style={[styles.logo, Platform.OS === "web" && styles.logoWeb]}
+          />
+
+        {/* settings button */}
         <Pressable style={styles.settingsButton}>
           <MaterialIcons name="settings" size={32} color="#000000" />
         </Pressable>
       </View>
 
       {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
-        <View style={styles.talkContainer}>
+        <View style={[styles.talkContainer, Platform.OS === "web" && styles.talkContainerWeb, hintMode === "off" && styles.bigTalkContainer]}>
           <Text style={styles.talkText}>{isStreaming ? streamedTalk : talk}</Text>
         </View>
       )}
+      {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
+        <View style={[styles.hide, Platform.OS === "web" && hintMode !== "off" && styles.showTutor]}>
+          <Text style={styles.tutorText}>{ hintMode === "hint" ? "Hint" : "Tutor"}</Text>
+        </View>
+      )}
+      
 
-      <ScrollView style={styles.teachScroll} contentContainerStyle={styles.teachContent}>
+      <ScrollView style={[styles.teachScroll, Platform.OS === "web" && styles.teachScrollWeb, hintMode === "off" && styles.hide]} contentContainerStyle={styles.teachContent}>
         {messages.map(msg => (
           <View key={msg.id} style={styles.messageBlock}>
             {msg.role === "user" && <Text style={styles.userText}>{msg.content}</Text>}
@@ -373,17 +430,63 @@ export default function HomeScreen() {
         ))}
       </ScrollView>
 
-      <View style={styles.inputWrapper}>
+      <View style={[styles.inputWrapper, Platform.OS === "web" && styles.inputWrapperWeb]}>
+        
+        <View style={[styles.helpBar, Platform.OS === "web" && styles.helpBarWeb]}>
+        <View style={[styles.segment, Platform.OS === "web" && styles.segmentWeb]}>
+          <Pressable
+            onPress={() => sethintMode("off")}
+            style={[
+              styles.segmentBtn,
+              styles.segmentLeft,
+              hintMode === "off" && styles.segmentBtnActive
+            ]}
+          >
+            <Text style={[styles.segmentText, hintMode === "off" && styles.segmentTextActive]}>
+              Off
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => sethintMode("hint")}
+            style={[
+              styles.segmentBtn,
+              styles.segmentMiddle,
+              hintMode === "hint" && styles.segmentBtnActive, Platform.OS === "web" && styles.segmentMiddleWeb
+            ]}
+          >
+            <Text style={[styles.segmentText, hintMode === "hint" && styles.segmentTextActive]}>
+              Hint
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => sethintMode("tutor")}
+            style={[
+              styles.segmentBtn,
+              styles.segmentRight,
+              hintMode === "tutor" && styles.segmentBtnActive
+            ]}
+          >
+            <Text style={[styles.segmentText, hintMode === "tutor" && styles.segmentTextActive]}>
+              Tutor
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+        
         <TextInput
-          style={styles.input}
+          style={[styles.input, Platform.OS === "web" && styles.inputWeb]}
           placeholder="Ask something..."
           value={input}
           onChangeText={setInput}
           multiline
         />
 
+        
+
         <Pressable
-          style={styles.sendButton}
+          style={[styles.sendButton, Platform.OS === "web" && styles.sendButtonWeb]}
           onPress={sendPhase === "sending" ? stopStreaming : sendMessage}
           disabled={sendPhase === "idle"}
         >
@@ -401,25 +504,78 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: "flex-end",
     paddingHorizontal: 20,
     paddingTop: 80,
-    paddingBottom: 20
+    paddingBottom: 20,
+  },
+  bigTalkContainer: {
+    left: 0,
+    right: 0,
+    bottom: "30%",
+    marginVertical: 0,
+    paddingBottom: 50,
+    paddingTop: 50,
+    borderBottomWidth: 0
   },
   topBar: {
     position: "absolute",
-    top: 20,
+    top: 12,
     left: 20,
     right: 20,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    zIndex: 10
+    zIndex: 10,
+    
   },
-  logo: { fontSize: 22, fontWeight: "600" },
+  logo: { width: 200, height: 80, left:"20%", top: 10, resizeMode: "contain" },
+  logoWeb: { width: 110, height: 60, left:0, top: 0, resizeMode: "contain" },
   settingsButton: { padding: 6 },
 
-  talkContainer: { marginVertical: 24, alignItems: "center" },
+  helpBar: {
+    width: "70%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  helpTitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  segment: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden"
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  segmentLeft: {},
+  segmentMiddle: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1
+  },
+  segmentRight: {},
+  segmentBtnActive: {
+    backgroundColor: "#001d34"
+  },
+  segmentText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#001d34"
+  },
+  segmentTextActive: {
+    color: "#dcf9ff"
+  },
+
+  talkContainer: { marginTop: 48, marginBottom: 10, alignItems: "center",},
   talkText: {
     fontSize: 20,
     fontWeight: "500",
@@ -427,9 +583,9 @@ const styles = StyleSheet.create({
     maxWidth: "90%"
   },
 
-  teachScroll: { flex: 1, width: "100%", marginBottom: 16 },
+  teachScroll: { flex: 1, width: "100%" },
   teachContent: { paddingHorizontal: 20 },
-  messageBlock: { marginBottom: 16 },
+  messageBlock: { marginBottom: 16},
 
   userText: {
     fontSize: 15,
@@ -444,8 +600,9 @@ const styles = StyleSheet.create({
 
   inputWrapper: {
     position: "relative",
-    marginBottom: 12,
-    marginTop: 12,
+    
+    marginBottom: 10,
+    marginTop: 0,
     marginLeft: 20,
     marginRight: 20
   },
@@ -465,5 +622,87 @@ const styles = StyleSheet.create({
     backgroundColor: "#001d34",
     justifyContent: "center",
     alignItems: "center"
+  },
+
+  hide: {
+    display: "none",  
+  },
+  showTutor: {
+    display: "flex",
+    position: "absolute",
+    top: 103,
+    alignItems: "center",
+    marginVertical: 0,
+    borderTopWidth: 1,
+    width: "8%",
+  },
+  tutorText: {
+    fontSize: 14,
+    color: "#dcf9ff",
+    backgroundColor: "#001d34",
+    paddingHorizontal: 4,
+    paddingBottom: 4,
+    borderBottomEndRadius: 6,
+    borderBottomStartRadius: 6,
+  },
+
+  talkContainerWeb: { 
+        position: "fixed",
+    top: 66,
+    width: "100%",
+    marginBottom: 0, 
+    paddingBottom: 10,
+    backgroundColor: "#f0f0f000",
+    borderBottomWidth: 1,
+    borderBottomColor: "#ccc",
+    marginTop: 0, 
+    alignItems: "center" 
+  },
+  teachScrollWeb:{
+    top: 50,
+    marginTop: 33,
+    marginBottom: 47,
+  },
+  inputWrapperWeb:{
+    position: "relative",
+    marginBottom: 0,
+    paddingTop: 37,
+    paddingBottom: 40,
+  },
+    inputWeb:{
+    position: "fixed",
+    width: "75%",
+    alignSelf: "center",
+    marginLeft: 15,
+    marginRight: 10,
+    bottom: 55,
+    borderWidth: 1,
+    borderRadius: 40,
+    paddingBottom: 0,
+  },
+  sendButtonWeb: {
+    position: "fixed",
+    height: 65,
+    width: 65,
+    right: "3%",
+    bottom: 55,
+    borderRadius: 40,
+  },
+  helpBarWeb: {
+    position: "fixed",
+    bottom: 49, //55 above floor, -6 margin
+    left: 5,
+    width: "12%",
+    paddingBottom: -6,
+  },
+   segmentWeb: {
+    height: 65,
+    flexDirection: "column",
+   },
+  segmentMiddleWeb: {
+    borderBottomWidth: 1,
+    borderTopWidth: 1,
+    borderLeftWidth: 0,
+    borderRightWidth: 0
   }
 });
