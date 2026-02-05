@@ -1,14 +1,27 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import { Buffer } from "buffer";
-import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
 import { makeId } from "@/utils/uuid";
+import { ActivityIndicator } from "react-native";
+
 import { useEffect, useRef, useState } from "react";
+
+import {
+  useAudioPlayer,
+  setAudioModeAsync,
+  useAudioRecorder,
+  RecordingPresets,
+  AudioModule,
+  useAudioRecorderState,
+} from "expo-audio";
+
 import {
   View,
   Text,
   Image,
   Keyboard,
+  Animated,
+  useWindowDimensions,
   TextInput,
   StyleSheet,
   KeyboardAvoidingView,
@@ -43,20 +56,26 @@ export default function HomeScreen() {
   const { learnLang, voiceId } = settings;
   const router = useRouter();
 
-
+  //talk
   const [streamedTalk, setStreamedTalk] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showTalk, setShowTalk] = useState(false);
 
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const abortRef = useRef<AbortController | null>(null);
-
+  //tts
   const ttsPlayer = useAudioPlayer();
 
   //tutor/teach bar
   type hintMode = "off" | "hint" | "tutor";
   const [hintMode, sethintMode] = useState<hintMode>("tutor");
 
+
+
+  // STT
+  const audioRecorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
   // TTS queueing system
   const textQueueRef = useRef<string[]>([]);
@@ -66,18 +85,103 @@ export default function HomeScreen() {
 
   const MAX_PREFETCH = 2; // number of audio generations allowed ahead
 
+  //Animated UX
+  const { width, height } = useWindowDimensions();
+
+  const [micOverlayOpen, setMicOverlayOpen] = useState(false);
+  const micAnim = useRef(new Animated.Value(0)).current;
+
+  // tune these (match your existing button sizes)
+  const SMALL = Platform.OS === "web" ? 65 : 40;
+  const SCALE_UP = Platform.OS === "web" ? 1.5 : 2.2;
+
+  // // approximate your bottom-right placement
+  // const rightPad = Platform.OS === "web" ? Math.round(width * 0.03) : 12;
+  // const bottomPad = Platform.OS === "web" ? 0 : 12;
+
+  // const startLeft = width - rightPad - SMALL;
+  // const startTop = height - bottomPad - SMALL;
+
+  // // Target = bottom-center of the screen (same vertical line as start)
+  // // We also "lift" by the scale delta so the bottom edge stays anchored
+  // const targetDx = Platform.OS === "web" ? width / 2 - (startLeft - SMALL) : width / 2 - (startLeft + SMALL / 2);
+
+  // // When scaling from 1 -> SCALE_UP, the height increases by SMALL*(SCALE_UP-1).
+  // // To keep the bottom of the circle from going off-screen, lift by the full delta.
+  // const targetDy = Platform.OS === "web" ? 35 : -SMALL * (SCALE_UP - 1);
+  const rightPad = Platform.OS === "web" ? Math.round(width * 0.03) :Math.round(width * 0.15) ; //40
+  const bottomPad = Platform.OS === "web" ? 55 : 65;
+
+  const startLeft = width - rightPad - SMALL;
+  const startTop = height - bottomPad - SMALL;
+
+  // unified and sane for all platforms
+  const targetDx = width / 2 - (startLeft + SMALL / 2);
+  const targetDy = Platform.OS === "web" ? -SMALL * (SCALE_UP - 1) : -SMALL * (SCALE_UP - 1.5);
+
+
+  const tx = micAnim.interpolate({ inputRange: [0, 1], outputRange: [0, targetDx] });
+  const ty = micAnim.interpolate({ inputRange: [0, 1], outputRange: [0, targetDy] });
+  const sc = micAnim.interpolate({ inputRange: [0, 1], outputRange: [1, SCALE_UP] });
+
+  const openMicOverlay = () => {
+    setMicOverlayOpen(true);
+    Animated.timing(micAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeMicOverlay = () => {
+    Animated.timing(micAnim, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setMicOverlayOpen(false);
+    });
+  };
+
+  // Clicking outside cancels recording (does NOT send) and collapses
+  const onBackdropPress = async () => {
+    try {
+      if (recorderState.isRecording) {
+        await audioRecorder.stop(); // cancel recording (no send)
+      }
+    } catch { }
+    closeMicOverlay();
+  };
+
+
+
+
 
   // warm up ping
   useEffect(() => {
     fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
 
+  //STT
+  useEffect(() => {
+    (async () => {
+      const status = await AudioModule.requestRecordingPermissionsAsync();
+      if (!status.granted) {
+        console.warn("Microphone permission denied");
+        return;
+      }
 
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
+      });
+    })().catch(() => { });
+  }, []);
 
   // audio mode setup
-  useEffect(() => {
-    setAudioModeAsync({ playsInSilentMode: true }).catch(() => { });
-  }, []);
+  // useEffect(() => {
+  //   setAudioModeAsync({ playsInSilentMode: true }).catch(() => { });
+  // }, []);
 
   useEffect(() => {
     if (isStreaming || loading) setSendPhase("sending");
@@ -87,10 +191,10 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const sub = ttsPlayer.addListener("playbackStatusUpdate", (status: any) => {
-      // The field names vary a bit across expo versions, so check a few patterns
+      //  for chunk checking
       const didJustFinish = status?.didJustFinish === true;
 
-      const isLoaded = status?.isLoaded ?? true; // some builds omit it
+      const isLoaded = status?.isLoaded ?? true;
       const isPlaying = status?.isPlaying === true;
 
       const position = status?.positionMillis ?? status?.position ?? 0;
@@ -110,6 +214,44 @@ export default function HomeScreen() {
 
     return () => sub.remove?.();
   }, [ttsPlayer]);
+
+  //STT
+  const transcribeLastRecording = async (): Promise<string> => {
+    const uri = audioRecorder.uri;
+    if (!uri) return "";
+
+    const form = new FormData();
+    form.append("lang", learnLang);
+
+    if (Platform.OS === "web") {
+      const blob = await (await fetch(uri)).blob();
+      form.append("audio", blob, "speech.webm");
+    } else {
+      form.append(
+        "audio",
+        {
+          uri,
+          name: "speech.m4a",
+          type: "audio/m4a",
+        } as any
+      );
+    }
+
+    const res = await fetch(`${API_URL}/stt`, {
+      method: "POST",
+      body: form,
+    });
+
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("STT failed:", res.status, j);
+      return "";
+    }
+
+    return String(j?.text ?? "").trim();
+  };
+
+
 
 
 
@@ -141,41 +283,67 @@ export default function HomeScreen() {
   };
 
   const synthesizeOne = async (text: string) => {
-    const ttsResp = await fetch(`${API_URL}/tts_xtts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language: learnLang, chunkSize: 20, voice: voiceId})
-    });
+    const myRun = runIdRef.current;
 
-    if (!ttsResp.ok) {
-      const err = await ttsResp.text().catch(() => "");
-      console.error("XTTS failed:", ttsResp.status, err, "text=", text);
-      return;
-    }
+    const ac = new AbortController();
+    ttsAbortSetRef.current.add(ac);
 
-    const ab = await ttsResp.arrayBuffer();
-    const ct = ttsResp.headers.get("content-type") ?? "";
-    const isWav = ct.includes("wav");
-    const ext = isWav ? "wav" : "mp3";
-    const mime = isWav ? "audio/wav" : "audio/mpeg";
-
-    if (Platform.OS === "web") {
-      const blob = new Blob([ab], { type: mime });
-      const url = URL.createObjectURL(blob);
-      playQueueRef.current.push({ uri: url, kind: "web" });
-    } else {
-      const base64 = Buffer.from(new Uint8Array(ab)).toString("base64");
-      const uri = `${FileSystem.cacheDirectory}tts-${Date.now()}-${Math.random()
-        .toString(16)
-        .slice(2)}.${ext}`;
-
-      await FileSystem.writeAsStringAsync(uri, base64, {
-        encoding: FileSystem.EncodingType.Base64
+    try {
+      const ttsResp = await fetch(`${API_URL}/tts_xtts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
+        body: JSON.stringify({
+          text,
+          language: learnLang,
+          chunkSize: 20,
+          voice: voiceId,
+        }),
       });
 
-      playQueueRef.current.push({ uri, kind: "native" });
+      // If user stopped / new run started, discard
+      if (myRun !== runIdRef.current) return;
+
+      if (!ttsResp.ok) {
+        const err = await ttsResp.text().catch(() => "");
+        console.error("XTTS failed:", ttsResp.status, err, "text=", text);
+        return;
+      }
+
+      const ab = await ttsResp.arrayBuffer();
+
+      // Discard if run changed while awaiting
+      if (myRun !== runIdRef.current) return;
+
+      const ct = ttsResp.headers.get("content-type") ?? "";
+      const isWav = ct.includes("wav");
+      const ext = isWav ? "wav" : "mp3";
+      const mime = isWav ? "audio/wav" : "audio/mpeg";
+
+      if (Platform.OS === "web") {
+        const blob = new Blob([ab], { type: mime });
+        const url = URL.createObjectURL(blob);
+        playQueueRef.current.push({ uri: url, kind: "web" });
+      } else {
+        const base64 = Buffer.from(new Uint8Array(ab)).toString("base64");
+        const uri = `${FileSystem.cacheDirectory}tts-${Date.now()}-${Math.random()
+          .toString(16)
+          .slice(2)}.${ext}`;
+
+        await FileSystem.writeAsStringAsync(uri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        if (myRun !== runIdRef.current) return;
+        playQueueRef.current.push({ uri, kind: "native" });
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.error("XTTS synth error:", e);
+    } finally {
+      ttsAbortSetRef.current.delete(ac);
     }
   };
+
 
   const pumpPlayback = async () => {
     if (playingRef.current) return;
@@ -187,12 +355,17 @@ export default function HomeScreen() {
     try {
       if (next.kind === "web") {
         const audioEl = new Audio(next.uri);
+        currentWebAudioRef.current = audioEl;
+
         audioEl.onended = () => {
           URL.revokeObjectURL(next.uri);
+          if (currentWebAudioRef.current === audioEl) currentWebAudioRef.current = null;
           playingRef.current = false;
           void pumpPlayback();
         };
+
         await audioEl.play();
+
       } else {
         // native
         ttsPlayer.replace({ uri: next.uri });
@@ -208,25 +381,123 @@ export default function HomeScreen() {
     }
   };
 
-  const stopStreaming = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
 
+
+
+
+
+  const runIdRef = useRef(0);
+
+  // Abort all in-flight XTTS requests (client side)
+  const ttsAbortSetRef = useRef<Set<AbortController>>(new Set());
+
+  // Stop currently playing web audio instantly
+  const currentWebAudioRef = useRef<any>(null);
+
+  const bumpRun = () => {
+    runIdRef.current += 1;
+    return runIdRef.current;
+  };
+
+  const abortAllTtsFetches = () => {
+    for (const ac of ttsAbortSetRef.current) ac.abort();
+    ttsAbortSetRef.current.clear();
+  };
+
+  const hardStopAudioNow = () => {
+    // stop queued playback + in-flight prefetch bookkeeping
     textQueueRef.current = [];
     playQueueRef.current = [];
     inFlightRef.current = 0;
     playingRef.current = false;
 
-    ttsPlayer.pause?.();
+    // stop native audio immediately
+    try {
+      ttsPlayer.pause?.();
+      ttsPlayer.seekTo?.(0);
+    } catch { }
+
+    // stop web audio immediately
+    try {
+      if (currentWebAudioRef.current) {
+        currentWebAudioRef.current.pause?.();
+        currentWebAudioRef.current.src = "";
+        currentWebAudioRef.current = null;
+      }
+    } catch { }
+  };
+
+
+
+
+
+
+
+  const stopStreaming = () => {
+    // invalidate all pending work immediately
+    bumpRun();
+
+    // stop talk stream
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    // stop all XTTS fetches + playback + queues NOW
+    abortAllTtsFetches();
+    hardStopAudioNow();
 
     setIsStreaming(false);
     setLoading(false);
-    setTimeout(() => setShowTalk(false), 800);
+    setIsTranscribing(false);
+
+    setTimeout(() => setShowTalk(false), 200);
   };
 
-  const sendMessage = async () => {
-    const text = input.trim();
+
+  const onPrimaryPress = async () => {
+    // 1) if chat streaming, stop it
+    if (isStreaming || loading) {
+      stopStreaming();
+      return;
+    }
+
+    // 2) if currently recording, stop -> transcribe -> send
+    if (recorderState.isRecording) {
+
+      closeMicOverlay();
+
+      try {
+        setIsTranscribing(true);
+        await audioRecorder.stop();
+        const transcript = await transcribeLastRecording();
+        if (transcript) await sendMessage(transcript);
+      } finally {
+        setIsTranscribing(false);
+      }
+      return;
+    }
+
+    // 3) if there is typed input, send it
+    if (input.trim().length > 0) {
+      await sendMessage();
+      return;
+    }
+
+    // 4) otherwise start recording
+    Keyboard.dismiss();
+    openMicOverlay();
+    await audioRecorder.prepareToRecordAsync();
+    audioRecorder.record();
+  };
+
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text || loading) return;
+
+    setInput("");
+
+    bumpRun();
+    abortAllTtsFetches();
+    hardStopAudioNow();
 
     setMessages(prev => [...prev, { id: makeId(), role: "user", content: text }]);
 
@@ -394,6 +665,9 @@ export default function HomeScreen() {
     }
   };
 
+  const shouldHideCorner = micOverlayOpen && input.trim().length === 0;
+  const collapseInput = micOverlayOpen && input.trim().length === 0;
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, Platform.OS === "web" && { paddingTop: 20, paddingBottom: 0 }]}
@@ -403,26 +677,23 @@ export default function HomeScreen() {
 
         {/* Name */}
         {/* <Text style={styles.logo}>Polybot</Text> */}
-   
-           <Image
-                  source={require('@/assets/images/SmallPolybotLogoLIGHT.png')}
-                  style={[styles.logo, Platform.OS === "web" && styles.logoWeb]}
-          />
+
+        <Image
+          source={require('@/assets/images/SmallPolybotLogoLIGHT.png')}
+          style={[styles.logo, Platform.OS === "web" && styles.logoWeb]}
+        />
 
         {/* settings button */}
-        {/* <Pressable style={styles.settingsButton}>
-          <MaterialIcons name="settings" size={32} color="#000000" />
-        </Pressable> */}
-    <Stack> 
-<Stack.Screen name="settings" options={{ presentation: "modal", headerShown: true, title: "Settings" }} />
-          </Stack>
+        <Stack>
+          <Stack.Screen name="settings" options={{ presentation: "modal", headerShown: true, title: "Settings" }} />
+        </Stack>
 
         <Pressable style={styles.settingsButton} onPress={() => router.push("/settings")}>
           <MaterialIcons name="settings" size={32} color="#000000" />
         </Pressable>
 
 
-      
+
 
       </View>
 
@@ -433,10 +704,10 @@ export default function HomeScreen() {
       )}
       {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
         <View style={[styles.hide, Platform.OS === "web" && hintMode !== "off" && styles.showTutor]}>
-          <Text style={styles.tutorText}>{ hintMode === "hint" ? "Hint" : "Tutor"}</Text>
+          <Text style={styles.tutorText}>{hintMode === "hint" ? "Hint" : "Tutor"}</Text>
         </View>
       )}
-      
+
 
       <ScrollView style={[styles.teachScroll, Platform.OS === "web" && styles.teachScrollWeb, hintMode === "off" && styles.hide]} contentContainerStyle={styles.teachContent}>
         {messages.map(msg => (
@@ -450,74 +721,125 @@ export default function HomeScreen() {
       </ScrollView>
 
       <View style={[styles.inputWrapper, Platform.OS === "web" && styles.inputWrapperWeb]}>
-        
+
         <View style={[styles.helpBar, Platform.OS === "web" && styles.helpBarWeb]}>
-        <View style={[styles.segment, Platform.OS === "web" && styles.segmentWeb]}>
-          <Pressable
-            onPress={() => sethintMode("off")}
-            style={[
-              styles.segmentBtn,
-              styles.segmentLeft,
-              hintMode === "off" && styles.segmentBtnActive
-            ]}
-          >
-            <Text style={[styles.segmentText, hintMode === "off" && styles.segmentTextActive]}>
-              Off
-            </Text>
-          </Pressable>
+          <View style={[styles.segment, Platform.OS === "web" && styles.segmentWeb]}>
+            <Pressable
+              onPress={() => sethintMode("off")}
+              style={[
+                styles.segmentBtn,
+                styles.segmentLeft,
+                hintMode === "off" && styles.segmentBtnActive,
+                Platform.OS === "web" && styles.segmentLeftWeb
+              ]}
+            >
+              <Text style={[styles.segmentText, hintMode === "off" && styles.segmentTextActive]}>
+                Off
+              </Text>
+            </Pressable>
 
-          <Pressable
-            onPress={() => sethintMode("hint")}
-            style={[
-              styles.segmentBtn,
-              styles.segmentMiddle,
-              hintMode === "hint" && styles.segmentBtnActive, 
-              Platform.OS === "web" && styles.segmentMiddleWeb
-            ]}
-          >
-            <Text style={[styles.segmentText, hintMode === "hint" && styles.segmentTextActive]}>
-              Hint
-            </Text>
-          </Pressable>
+            <Pressable
+              onPress={() => sethintMode("hint")}
+              style={[
+                styles.segmentBtn,
+                styles.segmentMiddle,
+                hintMode === "hint" && styles.segmentBtnActive,
+                Platform.OS === "web" && styles.segmentMiddleWeb
+              ]}
+            >
+              <Text style={[styles.segmentText, hintMode === "hint" && styles.segmentTextActive]}>
+                Hint
+              </Text>
+            </Pressable>
 
-          <Pressable
-            onPress={() => sethintMode("tutor")}
-            style={[
-              styles.segmentBtn,
-              styles.segmentRight,
-              hintMode === "tutor" && styles.segmentBtnActive,
-              Platform.OS === "web" && styles.segmentRightWed
-            ]}
-          >
-            <Text style={[styles.segmentText, hintMode === "tutor" && styles.segmentTextActive]}>
-              Tutor
-            </Text>
-          </Pressable>
+            <Pressable
+              onPress={() => sethintMode("tutor")}
+              style={[
+                styles.segmentBtn,
+                styles.segmentRight,
+                hintMode === "tutor" && styles.segmentBtnActive,
+                Platform.OS === "web" && styles.segmentRightWeb
+              ]}
+            >
+              <Text style={[styles.segmentText, hintMode === "tutor" && styles.segmentTextActive]}>
+                Tutor
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
-        
+
         <TextInput
-          style={[styles.input, Platform.OS === "web" && styles.inputWeb]}
-          placeholder="Ask something..."
+          style={[
+            styles.input,
+            Platform.OS === "web" && styles.inputWeb,
+            collapseInput && styles.inputCollapsed,
+            collapseInput && Platform.OS === "web" && styles.inputWebCollapsed,
+          ]}
+          placeholder="Ask Anything"
+          placeholderTextColor={"#8e8e8e"}
           value={input}
           onChangeText={setInput}
           multiline
         />
 
-        
+
+       
+
 
         <Pressable
-          style={[styles.sendButton, Platform.OS === "web" && styles.sendButtonWeb]}
-          onPress={sendPhase === "sending" ? stopStreaming : sendMessage}
-          disabled={sendPhase === "idle"}
+          pointerEvents={shouldHideCorner ? "none" : "auto"}
+          style={[
+            styles.sendButton,
+            Platform.OS === "web" && styles.sendButtonWeb,
+            shouldHideCorner && { opacity: 0 },
+          ]}
+          onPress={onPrimaryPress}
         >
-          {sendPhase === "idle" && (
-            <MaterialIcons name="graphic-eq" size={34} color="#dcf9ff" />
+          {isStreaming || loading ? (
+            <ActivityIndicator size="small" color="#dcf9ff" />
+          ) : recorderState.isRecording || isTranscribing ? (
+            <MaterialIcons name="stop" size={28} color="#dcf9ff" />
+          ) : input.trim().length > 0 ? (
+            <MaterialIcons name="north" size={27} color="#dcf9ff" />
+          ) : (
+            <MaterialIcons name="graphic-eq" size={38} color="#dcf9ff" />
           )}
-          {sendPhase === "ready" && <MaterialIcons name="north" size={27} color="#dcf9ff" />}
-          {sendPhase === "sending" && <MaterialIcons name="stop" size={28} color="#dcf9ff" />}
         </Pressable>
+
       </View>
+
+      {micOverlayOpen && (
+  <View style={[styles.overlayRoot, Platform.OS === "web" && styles.overlayRootWeb]}>
+    <Pressable style={styles.micBackdrop} onPress={onBackdropPress} />
+
+    <Animated.View
+      style={[
+        styles.micFloating,
+        {
+          left: startLeft,
+          top: startTop,
+          transform: [{ translateX: tx }, { translateY: ty }, { scale: sc }],
+        },
+      ]}
+    >
+      <Pressable
+        style={[
+          styles.micButton,
+          { width: SMALL, height: SMALL, borderRadius: SMALL / 2 },
+        ]}
+        onPress={onPrimaryPress}
+      >
+        {isTranscribing ? (
+          <ActivityIndicator size="small" color="#dcf9ff" />
+        ) : isStreaming || loading || recorderState.isRecording ? (
+          <MaterialIcons name="stop" size={28} color="#dcf9ff" />
+        ) : (
+          <ActivityIndicator size="small" color="#dcf9ff" />
+        )}
+      </Pressable>
+    </Animated.View>
+  </View>
+)}
     </KeyboardAvoidingView>
   );
 }
@@ -548,10 +870,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     zIndex: 10,
-    
+
   },
-  logo: { width: 200, height: 80, left:"20%", top: 10, resizeMode: "contain" },
-  logoWeb: { width: 110, height: 60, left:0, top: 0, resizeMode: "contain" },
+  logo: { width: 200, height: 80, left: "20%", top: 10, resizeMode: "contain" },
+  logoWeb: { width: 110, height: 60, left: 0, top: 0, resizeMode: "contain" },
   settingsButton: { padding: 6 },
 
   helpBar: {
@@ -569,6 +891,7 @@ const styles = StyleSheet.create({
   segment: {
     flexDirection: "row",
     borderWidth: 1,
+    borderColor: "#8e8e8e",
     borderRadius: 12,
     overflow: "hidden"
   },
@@ -578,12 +901,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  segmentLeft: {},
+  segmentLeft: {marginRight: -2},
   segmentMiddle: {
     borderLeftWidth: 1,
     borderRightWidth: 1
   },
-  segmentRight: {marginLeft: -2},
+  segmentRight: { marginLeft: -2 },
   segmentBtnActive: {
     backgroundColor: "#001d34"
   },
@@ -596,7 +919,7 @@ const styles = StyleSheet.create({
     color: "#dcf9ff"
   },
 
-  talkContainer: { marginTop: 48, marginBottom: 10, alignItems: "center",},
+  talkContainer: { marginTop: 48, marginBottom: 10, alignItems: "center", },
   talkText: {
     fontSize: 20,
     fontWeight: "500",
@@ -606,7 +929,7 @@ const styles = StyleSheet.create({
 
   teachScroll: { flex: 1, width: "100%" },
   teachContent: { paddingHorizontal: 20 },
-  messageBlock: { marginBottom: 16},
+  messageBlock: { marginBottom: 16 },
 
   userText: {
     fontSize: 15,
@@ -621,7 +944,7 @@ const styles = StyleSheet.create({
 
   inputWrapper: {
     position: "relative",
-    
+
     marginBottom: 10,
     marginTop: 0,
     marginLeft: 20,
@@ -629,6 +952,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
+    borderColor: "#8e8e8e",
     borderRadius: 40,
     padding: 20,
     fontSize: 16
@@ -645,8 +969,9 @@ const styles = StyleSheet.create({
     alignItems: "center"
   },
 
+  // Dynamic
   hide: {
-    display: "none",  
+    display: "none",
   },
   showTutor: {
     display: "flex",
@@ -667,30 +992,82 @@ const styles = StyleSheet.create({
     borderBottomStartRadius: 6,
   },
 
-  talkContainerWeb: { 
-        position: "fixed",
+  //Animation
+  overlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+  },
+  overlayRootWeb: {
+    position: "fixed",
+  },
+  micBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+  },
+  micFloating: {
+    position: "absolute",
+    zIndex: 10000,
+  },
+  micButton: {
+    backgroundColor: "#001d34",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // micBackdrop: {
+  //   ...StyleSheet.absoluteFillObject,
+  //   backgroundColor: "transparent",
+  //   zIndex: 999,
+  // },
+  // micFloating: {
+  //   position: "fixed",
+  //   zIndex: 1000,
+  // },
+  inputCollapsed: {
+    width: "35%",
+    borderRadius: 60,
+    alignSelf: "center",
+    color: "transparent",
+    backgroundColor: "black"
+  },
+  cancel: {
+    fontSize: 7,
+    color: "#dcf9ff"
+  },
+  // your web input is position: "fixed", so use left to “dock” it
+  inputWebCollapsed: {
+    width: "1%",
+    left: -50,      // leaves room for your left-side fixed controls
+    // left: "12.75%",
+    marginLeft: 0,
+    marginRight: 0,
+  },
+
+  //WEB
+  talkContainerWeb: {
+    position: "fixed",
     top: 66,
     width: "100%",
-    marginBottom: 0, 
+    marginBottom: 0,
     paddingBottom: 10,
     backgroundColor: "#f0f0f000",
     borderBottomWidth: 1,
     borderBottomColor: "#ccc",
-    marginTop: 0, 
-    alignItems: "center" 
+    marginTop: 0,
+    alignItems: "center"
   },
-  teachScrollWeb:{
+  teachScrollWeb: {
     top: 50,
     marginTop: 33,
     marginBottom: 47,
   },
-  inputWrapperWeb:{
+  inputWrapperWeb: {
     position: "relative",
     marginBottom: 0,
     paddingTop: 37,
     paddingBottom: 40,
   },
-    inputWeb:{
+  inputWeb: {
     position: "fixed",
     width: "75%",
     alignSelf: "center",
@@ -699,6 +1076,7 @@ const styles = StyleSheet.create({
     bottom: 55,
     borderWidth: 1,
     borderRadius: 40,
+    borderColor: "#8e8e8e",
     paddingBottom: 0,
   },
   sendButtonWeb: {
@@ -716,17 +1094,20 @@ const styles = StyleSheet.create({
     width: "12%",
     paddingBottom: -6,
   },
-   segmentWeb: {
+  segmentWeb: {
     height: 65,
     flexDirection: "column",
-   },
+  },
   segmentMiddleWeb: {
     borderBottomWidth: 1,
     borderTopWidth: 1,
     borderLeftWidth: 0,
     borderRightWidth: 0
   },
-  segmentRightWed: {
-  marginLeft: 0
+  segmentRightWeb: {
+    marginLeft: 0
+  },
+    segmentLeftWeb: {
+    marginRight: 0
   }
 });

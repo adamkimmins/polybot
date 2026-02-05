@@ -142,6 +142,41 @@ export default {
       });
     }
 
+    //STT
+        if (url.pathname === "/stt" && req.method === "POST") {
+      const STT_MODEL = env.STT_MODEL ?? "@cf/openai/whisper-large-v3-turbo";
+      const DEFAULT_STT_LANG = env.DEFAULT_STT_LANG ?? env.DEFAULT_TTS_LANG ?? "en";
+
+      let lang = DEFAULT_STT_LANG;
+
+      try {
+        const form = await req.formData();
+        const audio = form.get("audio");
+        const formLang = form.get("lang");
+
+        if (typeof formLang === "string" && formLang) lang = formLang;
+
+        if (!(audio instanceof File)) {
+          return json({ error: "Expected multipart form-data with 'audio' file" }, 400);
+        }
+
+        const ab = await audio.arrayBuffer();
+        const b64 = arrayBufferToBase64(ab);
+
+        const result: any = await env.AI.run(STT_MODEL, {
+          audio: b64,
+          language: lang,      // helps a lot for Italian
+          task: "transcribe",
+          vad_filter: true,
+        });
+
+        return json({ text: String(result?.text ?? "").trim(), lang });
+      } catch (e: any) {
+        return json({ error: "STT failed", details: String(e?.message ?? e) }, 500);
+      }
+    }
+    //END STT
+
     //OLD fallback method using Cloudflares built in TTS
     if (url.pathname === "/tts" && req.method === "POST") {
       let body: any;
@@ -262,6 +297,20 @@ export default {
     return json({ error: "Not found" }, 404);
   }
 };
+
+function arrayBufferToBase64(ab: ArrayBuffer): string {
+  const bytes = new Uint8Array(ab);
+  let binary = "";
+  const chunkSize = 0x8000; // avoid call stack limits
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+
+  // btoa exists in Workers
+  return btoa(binary);
+}
+
 
 function corsHeaders() {
   return {

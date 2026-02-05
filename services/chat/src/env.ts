@@ -7,4 +7,6 @@ export interface Env {
   DEFAULT_TTS_LANG?: string;
   DEFAULT_VOICE?: string;
 
+  STT_MODEL?: string;
+  DEFAULT_STT_LANG?: string;
 }

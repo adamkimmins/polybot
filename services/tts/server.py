@@ -27,7 +27,22 @@ async def tts_stream(request: Request):
     if not text:
         return Response(content="Missing 'text' header", status_code=400)
 
-    speaker_wav_path = os.path.join(VOICES_DIR, f"{voice}.wav")
+    # speaker_wav_path = os.path.join(VOICES_DIR, f"{voice}.wav")
+        # Choose best matching reference wav:
+    # priority: voice_{lang}.wav -> voice.wav
+    candidates = [
+        os.path.join(VOICES_DIR, f"{voice}_{language}.wav"),
+        os.path.join(VOICES_DIR, f"{voice}.wav"),
+    ]
+
+    speaker_wav_path = next((p for p in candidates if os.path.exists(p)), None)
+
+    if not speaker_wav_path:
+        return Response(
+            content=f"Voice file not found. Tried: {candidates}",
+            status_code=400,
+        )
+
 
     # If a custom voice is requested, REQUIRE the file to exist.
     # This prevents silent fallback to Ana.

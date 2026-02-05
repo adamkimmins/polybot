@@ -1,0 +1,6 @@
+XTTS_URL=http://(yourLanIP):8000
+TALK_MODEL=@cf/mistral/mistral-7b-instruct-v0.1
+DEFAULT_TTS_LANG=it
+DEFAULT_VOICE=adam
+STT_MODEL=@cf/openai/whisper-large-v3-turbo
+DEFAULT_STT_LANG=it
