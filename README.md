@@ -14,7 +14,7 @@ This includes:
 
 <img width="200" height="600" alt="Screenshot 2026-02-05 060001" src="https://github.com/user-attachments/assets/786ffa19-9f74-4071-8345-a574a02616d6" />
 <img width="200" height="600" alt="Screenshot 2026-02-05 060001" src="https://github.com/user-attachments/assets/2d09cf52-dd0c-45a5-a07a-908cc735c484" />
-<img width="500" height="700" alt="Screenshot 2026-02-05 060001" src="https://github.com/user-attachments/assets/5d5a832f-9d1a-449b-8d42-3e6b1e626bb1" />
+<img width="420" height="700" alt="Screenshot 2026-02-05 060001" src="https://github.com/user-attachments/assets/5d5a832f-9d1a-449b-8d42-3e6b1e626bb1" />
 
 # XTTS Audio Sample
 https://github.com/user-attachments/assets/68625683-e941-4fb3-b093-f93d4ee9920a
