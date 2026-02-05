@@ -45,12 +45,18 @@ High-level:
 7) Client plays audio while continuing to stream tokens
 -Optional: Client POSTs to `/teach` to generate a brief tutor explanation
 
+
 Expo Client (iOS/Web)
-├─ POST /stt (audio) ──────────────▶ Cloudflare Worker (STT via Workers AI)
-├─ POST /talk (SSE stream) ─────────▶ Cloudflare Worker (LLM streaming + DO memory)
-├─ POST /tts_xtts (sentence chunks) ─▶ Cloudflare Worker (proxy)
-│ └───────────────▶ XTTS FastAPI (PyTorch) /tts_stream
-└─ POST /teach (optional) ───────────▶ Cloudflare Worker (Tutor response)
+
+├─ POST /stt (audio) ──────────────> Cloudflare Worker (STT via Workers AI)
+
+├─ POST /talk (SSE stream) ─────────> Cloudflare Worker (LLM streaming + DO memory)
+
+├─ POST /tts_xtts (sentence chunks) ─> Cloudflare Worker (proxy)
+
+│ └───────────────> XTTS FastAPI (PyTorch) /tts_stream
+
+└─ POST /teach (optional) ───────────> Cloudflare Worker (Tutor response)
 
 ---
 
