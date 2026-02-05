@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, Response, Request
@@ -13,25 +14,71 @@ DEFAULT_LANG = "en"
 DEFAULT_VOICE = "adam"  # voices/adam.wav
 VOICES_DIR = os.path.join(os.path.dirname(__file__), "voices")
 
+
+def normalize_for_xtts(text: str, lang: str) -> str:
+    t = (text or "").strip()
+    L = (lang or "").lower()
+
+    if L.startswith("it"): # Italian has issue with period, can add any languages with similar issues.
+        protected = {}
+
+        def protect(m):
+            key = f"__ABBR{len(protected)}__"
+            protected[key] = m.group(0)
+            return key
+
+        # Optional: protect common abbreviations so we don't kill their dot
+        t = re.sub(r"\b(?:Sig|Dott|Dr|Prof|Ing|Avv)\.", protect, t)
+
+        # 3.14 -> 3,14
+        t = re.sub(r"(\d)\.(\d)", r"\1,\2", t)
+
+        # Sentence-final "." -> newline pause (prevents "punto")
+        t = re.sub(r"\.(\s+|$)", r"\n\1", t)
+
+        # Avoid literal reads like "due punti"
+        t = t.replace(":", " ")
+        t = t.replace(";", " ")
+        t = t.replace("•", " ")
+        t = t.replace("…", "\n")
+
+        # Light cleanup
+        t = re.sub(r"[\"“”‘’]", "", t)
+
+        # Restore abbreviations
+        for k, v in protected.items():
+            t = t.replace(k, v)
+
+        # Normalize whitespace but keep newlines as pauses
+        t = re.sub(r"[ \t]+", " ", t)
+        t = re.sub(r"\n{3,}", "\n\n", t).strip()
+
+        return t
+
+    # default non-IT cleanup
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 @app.post("/tts_stream")
 async def tts_stream(request: Request):
     h = request.headers
     text = h.get("text")
     language = h.get("language", DEFAULT_LANG)
 
-    # Prefer "voice"
     voice = h.get("voice", DEFAULT_VOICE)
-    speaker = h.get("speaker")  # option
+    speaker = h.get("speaker")  # optional built-in
 
     if not text:
         return Response(content="Missing 'text' header", status_code=400)
 
-    # priority: voice_{lang}.wav -> voice.wav
+    # normalize text BEFORE TTS to avoid "punto"
+    text = normalize_for_xtts(text, language)
+
     candidates = [
         os.path.join(VOICES_DIR, f"{voice}_{language}.wav"),
         os.path.join(VOICES_DIR, f"{voice}.wav"),
     ]
-
     speaker_wav_path = next((p for p in candidates if os.path.exists(p)), None)
 
     if not speaker_wav_path:
@@ -40,36 +87,27 @@ async def tts_stream(request: Request):
             status_code=400,
         )
 
-    # This prevents silent fallback to rigid default.
-    if voice and not os.path.exists(speaker_wav_path):
-        return Response(
-            content=f"Voice file not found: {speaker_wav_path}",
-            status_code=400,
-            headers={
-                "X-Voice-Mode": "missing-file",
-                "X-Voice-Path": speaker_wav_path,
-            },
-        )
-
     try:
-        # Try voice-clone path first
         if voice and os.path.exists(speaker_wav_path):
             try:
-                # Most common signature
                 wav = tts.tts(text=text, speaker_wav=speaker_wav_path, language=language)
                 mode = "speaker_wav"
             except TypeError:
-                # Some builds want a list
                 wav = tts.tts(text=text, speaker_wav=[speaker_wav_path], language=language)
                 mode = "speaker_wav_list"
         else:
-            # last resort, should never be used
             fallback = speaker or "Ana Florence"
             wav = tts.tts(text=text, speaker=fallback, language=language)
             mode = f"built_in:{fallback}"
 
         buf = io.BytesIO()
-        sf.write(buf, np.array(wav, dtype=np.float32), samplerate=24000, format="WAV", subtype="PCM_16")
+        sf.write(
+            buf,
+            np.array(wav, dtype=np.float32),
+            samplerate=24000,
+            format="WAV",
+            subtype="PCM_16",
+        )
         data = buf.getvalue()
 
         return Response(
@@ -79,6 +117,7 @@ async def tts_stream(request: Request):
                 "X-Voice-Mode": mode,
                 "X-Voice-Path": speaker_wav_path,
                 "X-Voice-Name": voice,
+                "X-Normalized": "1",
             },
         )
 
