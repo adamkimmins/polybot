@@ -27,6 +27,9 @@ export default function TabTwoScreen() {
           style={{
             fontFamily: Fonts.rounded,
           }}>
+
+{/* Completely useless for now, We will just store concept art here until Phase 2. */}
+
         <Image
           source={require('@/assets/images/MediumPolybotLogo.png')}
           style={{ width: 500, height: 500, alignSelf: 'center' }}

@@ -13,22 +13,19 @@ DEFAULT_LANG = "en"
 DEFAULT_VOICE = "adam"  # voices/adam.wav
 VOICES_DIR = os.path.join(os.path.dirname(__file__), "voices")
 
-
 @app.post("/tts_stream")
 async def tts_stream(request: Request):
     h = request.headers
     text = h.get("text")
     language = h.get("language", DEFAULT_LANG)
 
-    # Prefer "voice" for custom voice cloning. (speaker is built-in voices)
+    # Prefer "voice"
     voice = h.get("voice", DEFAULT_VOICE)
-    speaker = h.get("speaker")  # optional built-in
+    speaker = h.get("speaker")  # option
 
     if not text:
         return Response(content="Missing 'text' header", status_code=400)
 
-    # speaker_wav_path = os.path.join(VOICES_DIR, f"{voice}.wav")
-        # Choose best matching reference wav:
     # priority: voice_{lang}.wav -> voice.wav
     candidates = [
         os.path.join(VOICES_DIR, f"{voice}_{language}.wav"),
@@ -43,9 +40,7 @@ async def tts_stream(request: Request):
             status_code=400,
         )
 
-
-    # If a custom voice is requested, REQUIRE the file to exist.
-    # This prevents silent fallback to Ana.
+    # This prevents silent fallback to rigid default.
     if voice and not os.path.exists(speaker_wav_path):
         return Response(
             content=f"Voice file not found: {speaker_wav_path}",
@@ -57,7 +52,7 @@ async def tts_stream(request: Request):
         )
 
     try:
-        # Try voice-clone path first if voice file exists
+        # Try voice-clone path first
         if voice and os.path.exists(speaker_wav_path):
             try:
                 # Most common signature
@@ -68,7 +63,7 @@ async def tts_stream(request: Request):
                 wav = tts.tts(text=text, speaker_wav=[speaker_wav_path], language=language)
                 mode = "speaker_wav_list"
         else:
-            # Built-in speaker fallback
+            # last resort, should never be used
             fallback = speaker or "Ana Florence"
             wav = tts.tts(text=text, speaker=fallback, language=language)
             mode = f"built_in:{fallback}"

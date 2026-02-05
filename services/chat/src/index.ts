@@ -2,8 +2,6 @@ import type { Env } from "./env";
 import { TALK_SYSTEM_EN } from "./prompts/talk.en";
 import { TALK_SYSTEM_IT } from "./prompts/talk.it";
 
-
-// MUST be exported from entrypoint
 export { SessionDO } from "./session-do";
 
 export default {
@@ -25,7 +23,6 @@ export default {
       } catch {
         return json({ error: "Invalid JSON" }, 400);
       }
-
 
       const { userText, sessionId, lang } = body ?? {};
       const L: "en" | "it" = lang === "it" ? "it" : "en";
@@ -70,14 +67,13 @@ export default {
               if (ch === "(" || ch === "[") { suppress = true; continue; }
               if (ch === ")" || ch === "]") { suppress = false; continue; }
 
-              // safety: if model forgets to close, reset on newline
+              // safety- if model forgets to close, reset on newline
               if (ch === "\n") { suppress = false; out += ch; continue; }
 
               if (!suppress) out += ch;
             }
             return out;
           };
-
 
           try {
             while (true) {
@@ -116,7 +112,6 @@ export default {
                 );
               }
             }
-
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
             controller.close();
 
@@ -165,7 +160,7 @@ export default {
 
         const result: any = await env.AI.run(STT_MODEL, {
           audio: b64,
-          language: lang,      // helps a lot for Italian
+          language: lang,      // Not necessary but drastically improves recognition
           task: "transcribe",
           vad_filter: true,
         });
@@ -217,7 +212,7 @@ export default {
       }
     }
 
-    //NEW xtts version
+    //NEW xtts V2 version
     if (url.pathname === "/tts_xtts" && req.method === "POST") {
       let body: any;
       try {
@@ -240,7 +235,6 @@ export default {
       const upstream = await fetch(`${XTTS_URL}/tts_stream`, {
         method: "POST",
         headers: {
-          // the xtts streaming server expects these headers in common setups
           text: String(text),
           language: String(language),
           voice: String(voice),
@@ -254,7 +248,7 @@ export default {
         return json({ error: "XTTS upstream failed", status: upstream.status, details: err }, 502);
       }
 
-      // Stream passthrough (wav)
+      // Stream passthrough
       return new Response(upstream.body, {
         headers: {
           ...corsHeaders(),

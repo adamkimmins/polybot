@@ -83,42 +83,22 @@ export default function HomeScreen() {
   const playQueueRef = useRef<{ uri: string; kind: "native" | "web" }[]>([]);
   const playingRef = useRef(false);
 
-  const MAX_PREFETCH = 2; // number of audio generations allowed ahead
+  const MAX_PREFETCH = 2; // number of audio generations allowed ahead (Must match API fetch)
 
   //Animated UX
   const { width, height } = useWindowDimensions();
 
   const [micOverlayOpen, setMicOverlayOpen] = useState(false);
   const micAnim = useRef(new Animated.Value(0)).current;
-
-  // tune these (match your existing button sizes)
   const SMALL = Platform.OS === "web" ? 65 : 40;
   const SCALE_UP = Platform.OS === "web" ? 1.5 : 2.2;
-
-  // // approximate your bottom-right placement
-  // const rightPad = Platform.OS === "web" ? Math.round(width * 0.03) : 12;
-  // const bottomPad = Platform.OS === "web" ? 0 : 12;
-
-  // const startLeft = width - rightPad - SMALL;
-  // const startTop = height - bottomPad - SMALL;
-
-  // // Target = bottom-center of the screen (same vertical line as start)
-  // // We also "lift" by the scale delta so the bottom edge stays anchored
-  // const targetDx = Platform.OS === "web" ? width / 2 - (startLeft - SMALL) : width / 2 - (startLeft + SMALL / 2);
-
-  // // When scaling from 1 -> SCALE_UP, the height increases by SMALL*(SCALE_UP-1).
-  // // To keep the bottom of the circle from going off-screen, lift by the full delta.
-  // const targetDy = Platform.OS === "web" ? 35 : -SMALL * (SCALE_UP - 1);
   const rightPad = Platform.OS === "web" ? Math.round(width * 0.03) :Math.round(width * 0.15) ; //40
   const bottomPad = Platform.OS === "web" ? 55 : 65;
-
   const startLeft = width - rightPad - SMALL;
   const startTop = height - bottomPad - SMALL;
-
-  // unified and sane for all platforms
+  // unified for all platforms
   const targetDx = width / 2 - (startLeft + SMALL / 2);
   const targetDy = Platform.OS === "web" ? -SMALL * (SCALE_UP - 1) : -SMALL * (SCALE_UP - 1.5);
-
 
   const tx = micAnim.interpolate({ inputRange: [0, 1], outputRange: [0, targetDx] });
   const ty = micAnim.interpolate({ inputRange: [0, 1], outputRange: [0, targetDy] });
@@ -143,21 +123,17 @@ export default function HomeScreen() {
     });
   };
 
-  // Clicking outside cancels recording (does NOT send) and collapses
+  // Clicking outside cancels record AND collapses
   const onBackdropPress = async () => {
     try {
       if (recorderState.isRecording) {
-        await audioRecorder.stop(); // cancel recording (no send)
+        await audioRecorder.stop(); 
       }
     } catch { }
     closeMicOverlay();
   };
 
-
-
-
-
-  // warm up ping
+  // warm up
   useEffect(() => {
     fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
@@ -177,11 +153,6 @@ export default function HomeScreen() {
       });
     })().catch(() => { });
   }, []);
-
-  // audio mode setup
-  // useEffect(() => {
-  //   setAudioModeAsync({ playsInSilentMode: true }).catch(() => { });
-  // }, []);
 
   useEffect(() => {
     if (isStreaming || loading) setSendPhase("sending");
@@ -251,10 +222,6 @@ export default function HomeScreen() {
     return String(j?.text ?? "").trim();
   };
 
-
-
-
-
   const enqueueTtsChunk = (chunk: string) => {
     const cleaned = chunk.replace(/\s+/g, " ").trim();
     if (!cleaned) return;
@@ -265,7 +232,6 @@ export default function HomeScreen() {
     textQueueRef.current.push(cleaned);
     void pumpPrefetch();
   };
-
 
   const pumpPrefetch = async () => {
     // already prefetching enough
@@ -344,7 +310,6 @@ export default function HomeScreen() {
     }
   };
 
-
   const pumpPlayback = async () => {
     if (playingRef.current) return;
     const next = playQueueRef.current.shift();
@@ -363,7 +328,6 @@ export default function HomeScreen() {
           playingRef.current = false;
           void pumpPlayback();
         };
-
         await audioEl.play();
 
       } else {
@@ -381,16 +345,10 @@ export default function HomeScreen() {
     }
   };
 
-
-
-
-
-
   const runIdRef = useRef(0);
 
   // Abort all in-flight XTTS requests (client side)
   const ttsAbortSetRef = useRef<Set<AbortController>>(new Set());
-
   // Stop currently playing web audio instantly
   const currentWebAudioRef = useRef<any>(null);
 
@@ -427,12 +385,6 @@ export default function HomeScreen() {
     } catch { }
   };
 
-
-
-
-
-
-
   const stopStreaming = () => {
     // invalidate all pending work immediately
     bumpRun();
@@ -452,15 +404,14 @@ export default function HomeScreen() {
     setTimeout(() => setShowTalk(false), 200);
   };
 
-
   const onPrimaryPress = async () => {
-    // 1) if chat streaming, stop it
+    // 1 if chat streaming, stop it
     if (isStreaming || loading) {
       stopStreaming();
       return;
     }
 
-    // 2) if currently recording, stop -> transcribe -> send
+    // 2 if currently recording, stop -> transcribe -> send
     if (recorderState.isRecording) {
 
       closeMicOverlay();
@@ -476,13 +427,13 @@ export default function HomeScreen() {
       return;
     }
 
-    // 3) if there is typed input, send it
+    // 3 if there is typed input, send it
     if (input.trim().length > 0) {
       await sendMessage();
       return;
     }
 
-    // 4) otherwise start recording
+    // 4 otherwise start recording
     Keyboard.dismiss();
     openMicOverlay();
     await audioRecorder.prepareToRecordAsync();
@@ -494,7 +445,6 @@ export default function HomeScreen() {
     if (!text || loading) return;
 
     setInput("");
-
     bumpRun();
     abortAllTtsFetches();
     hardStopAudioNow();
@@ -504,13 +454,12 @@ export default function HomeScreen() {
     let fullText = "";
     let speechBuffer = "";
 
-    setInput("");
+    // setInput("");
     setLoading(true);
     setTalk("");
     setStreamedTalk("");
     setShowTalk(true);
     Keyboard.dismiss();
-
 
     try {
       abortRef.current = new AbortController();
@@ -526,9 +475,7 @@ export default function HomeScreen() {
         const errText = await res.text().catch(() => "");
         throw new Error(`Talk failed: ${res.status} ${errText}`);
       }
-
       const decoder = new TextDecoder();
-      // let fullText = "";
 
       const consumeSSEText = (raw: string) => {
         const events = raw.split(/\r?\n\r?\n/);
@@ -551,7 +498,7 @@ export default function HomeScreen() {
               fullText += token;
               setStreamedTalk(prev => prev + token);
 
-              // NEW: sentence-chunk TTS
+              // sentence-chunk TTS
               speechBuffer += token;
 
               // Pull out complete sentences/newlines from speechBuffer
@@ -569,9 +516,9 @@ export default function HomeScreen() {
                 const words = cleaned ? cleaned.split(" ").length : 0;
 
                 // Speak if it's not junk AND it's either:
-                // - at least 2 words, OR
-                // - at least 8 chars, OR
-                // - it's a very short first greeting (<= 6 chars but has letters)[trying to avoid stream intialization junk]
+                // at least 2 words, OR
+                // at least 8 chars, OR
+                // it's a very short first greeting (<= 6 chars but has letters)[trying to avoid stream intialization junk]
                 const hasLetters = /[A-Za-z]/.test(cleaned);
                 const ok =
                   cleaned.length >= 8 ||
@@ -620,7 +567,6 @@ export default function HomeScreen() {
         enqueueTtsChunk(speechBuffer);
         speechBuffer = "";
       }
-
 
       setIsStreaming(false);
       setTalk(fullText);
@@ -676,8 +622,6 @@ export default function HomeScreen() {
       <View style={styles.topBar}>
 
         {/* Name */}
-        {/* <Text style={styles.logo}>Polybot</Text> */}
-
         <Image
           source={require('@/assets/images/SmallPolybotLogoLIGHT.png')}
           style={[styles.logo, Platform.OS === "web" && styles.logoWeb]}
@@ -692,9 +636,6 @@ export default function HomeScreen() {
           <MaterialIcons name="settings" size={32} color="#000000" />
         </Pressable>
 
-
-
-
       </View>
 
       {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
@@ -707,7 +648,6 @@ export default function HomeScreen() {
           <Text style={styles.tutorText}>{hintMode === "hint" ? "Hint" : "Tutor"}</Text>
         </View>
       )}
-
 
       <ScrollView style={[styles.teachScroll, Platform.OS === "web" && styles.teachScrollWeb, hintMode === "off" && styles.hide]} contentContainerStyle={styles.teachContent}>
         {messages.map(msg => (
@@ -781,10 +721,6 @@ export default function HomeScreen() {
           onChangeText={setInput}
           multiline
         />
-
-
-       
-
 
         <Pressable
           pointerEvents={shouldHideCorner ? "none" : "auto"}
@@ -1013,16 +949,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // micBackdrop: {
-  //   ...StyleSheet.absoluteFillObject,
-  //   backgroundColor: "transparent",
-  //   zIndex: 999,
-  // },
-  // micFloating: {
-  //   position: "fixed",
-  //   zIndex: 1000,
-  // },
   inputCollapsed: {
     width: "35%",
     borderRadius: 60,
@@ -1034,11 +960,10 @@ const styles = StyleSheet.create({
     fontSize: 7,
     color: "#dcf9ff"
   },
-  // your web input is position: "fixed", so use left to “dock” it
+  //  “dock” it
   inputWebCollapsed: {
     width: "1%",
-    left: -50,      // leaves room for your left-side fixed controls
-    // left: "12.75%",
+    left: -50, //Just remove it left, will add anim later
     marginLeft: 0,
     marginRight: 0,
   },
