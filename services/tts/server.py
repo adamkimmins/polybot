@@ -101,6 +101,29 @@ async def tts_stream(request: Request):
             mode = f"built_in:{fallback}"
 
         buf = io.BytesIO()
+
+
+        wav = np.array(wav, dtype=np.float32)
+
+        # ---- Loudness / level fix (simple peak normalize + limiter) ----
+        peak = float(np.max(np.abs(wav))) + 1e-9
+
+        # Target -1 dBFS peak ≈ 0.891
+        target_peak = 10 ** (-1.0 / 20.0)
+
+        gain = target_peak / peak
+
+        # Cap gain so we don't blow up quiet/noisy outputs
+        gain = min(gain, 8.0)  # up to about +18 dB
+
+        wav = wav * gain
+
+        # Hard limiter safety
+        wav = np.clip(wav, -0.98, 0.98)
+        # ---------------------------------------------------------------
+
+
+
         sf.write(
             buf,
             np.array(wav, dtype=np.float32),

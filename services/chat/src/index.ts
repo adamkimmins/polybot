@@ -138,7 +138,7 @@ export default {
     }
 
     //STT
-        if (url.pathname === "/stt" && req.method === "POST") {
+    if (url.pathname === "/stt" && req.method === "POST") {
       const STT_MODEL = env.STT_MODEL ?? "@cf/openai/whisper-large-v3-turbo";
       const DEFAULT_STT_LANG = env.DEFAULT_STT_LANG ?? env.DEFAULT_TTS_LANG ?? "en";
 
@@ -267,26 +267,33 @@ export default {
         return json({ error: "Invalid JSON" }, 400);
       }
 
-      const { userText, talkText } = body ?? {};
-      if (!userText || !talkText) {
-        return json({ error: "userText and talkText are required" }, 400);
-      }
+      const { userText, talkText, mode } = body ?? {};
+      if (!userText) return json({ error: "userText is required" }, 400);
+
+      const teachMode: "translate" | "tutor" =
+        mode === "translate" || mode === "tutor" ? mode : "tutor";
+
+      const hasTalk = typeof talkText === "string" && talkText.trim().length > 0;
+
+      const system =
+        teachMode === "translate"
+          ? "You are a language tutor. Provide a short translation and 1–2 key notes. Be concise."
+          : "You are a language tutor. Explain grammar and meaning clearly in simple English. Be concise.";
+
+      const userPrompt = hasTalk
+        ? `User said:\n"${userText}"\n\nPolybot replied:\n"${talkText}"\n\nExplain briefly. Keep it short.`
+        : `User said:\n"${userText}"\n\nExplain briefly. Keep it short.`;
 
       const teachRes = await env.AI.run("@cf/meta/llama-3-8b-instruct", {
         messages: [
-          {
-            role: "system",
-            content: "You are a language tutor. Explain grammar and meaning clearly in simple English."
-          },
-          {
-            role: "user",
-            content: `User said:\n"${userText}"\n\nPolybot replied:\n"${talkText}"\n\nExplain briefly. Keep it as short as possible, do not over-explain.`
-          }
+          { role: "system", content: system },
+          { role: "user", content: userPrompt }
         ]
       });
 
       return json({ teach: teachRes.response });
     }
+
 
     return json({ error: "Not found" }, 404);
   }
