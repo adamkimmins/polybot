@@ -1,3 +1,5 @@
+// app/(tabs)/index.tsx  (or wherever your HomeScreen lives)
+
 import { MaterialIcons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import { Buffer } from "buffer";
@@ -28,11 +30,13 @@ import {
 } from "expo-audio";
 
 import { useSettings } from "@/components/settings";
-import { CenterMic } from "@/components/chat/CenterMic";
-import { BottomBar } from "@/components/chat/BottomBar";
 import { Stack, useRouter } from "expo-router";
 import BouncingDots from "@/components/chat/BouncingDots";
 import MiniWave from "@/components/chat/MiniWave";
+
+// ✅ NEW: extracted UI components
+import CenterMic from "@/components/chat/CenterMic";
+import BottomBar from "@/components/chat/BottomBar";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8787";
 const SESSION_ID = process.env.EXPO_PUBLIC_SESSION_ID ?? "local-dev-session";
@@ -141,6 +145,9 @@ export default function HomeScreen() {
     setIsStreaming(false);
     setLoading(false);
     setIsTranscribing(false);
+
+    // ✅ NEW: make sure mic UI never gets stuck in a non-idle phase
+    setMicPhase("idle");
 
     setTimeout(() => setShowTalk(false), 200);
   };
@@ -589,18 +596,19 @@ export default function HomeScreen() {
     }
   };
 
+  // cleaned indentation only (behavior unchanged)
   async function ensureRecordingReady() {
-  // re-check permission (iOS can be weird if user changed it)
-  const perm = await AudioModule.getRecordingPermissionsAsync();
-  if (!perm.granted) {
-    const req = await AudioModule.requestRecordingPermissionsAsync();
-    if (!req.granted) throw new Error("Mic permission not granted");
-  }
+    // re-check permission (iOS can be weird if user changed it)
+    const perm = await AudioModule.getRecordingPermissionsAsync();
+    if (!perm.granted) {
+      const req = await AudioModule.requestRecordingPermissionsAsync();
+      if (!req.granted) throw new Error("Mic permission not granted");
+    }
 
-  // make sure audio subsystem is active, then allow recording
-  await AudioModule.setIsAudioActiveAsync(true);
-  await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-}
+    // make sure audio subsystem is active, then allow recording
+    await AudioModule.setIsAudioActiveAsync(true);
+    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+  }
 
   // ---------- Primary press behavior ----------
   const startRecording = async () => {
@@ -613,8 +621,7 @@ export default function HomeScreen() {
     setMicPhase("arming");
 
     try {
-
-await ensureRecordingReady();
+      await ensureRecordingReady();
 
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
@@ -679,7 +686,6 @@ await ensureRecordingReady();
     // Mic startup / stopping takes priority for labels in voice UX
     if (busyMic) {
       const label = "Ending";
-      // When arming (not transcribing), show Loading instead of Ending
       const effectiveLabel = micPhase === "arming" && !isTranscribing ? "Loading" : label;
 
       return (
@@ -708,12 +714,12 @@ await ensureRecordingReady();
       );
     }
 
-    // END only when actually recording (this fixes your main bug)
+    // END only when actually recording
     if (recorderState.isRecording) {
       return (
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <Text style={{ color: "#dcf9ff", fontWeight: "900", fontSize: 12 }}>
-            END
+            End
           </Text>
           <View style={{ marginLeft: 8 }}>
             <MiniWave color="#dcf9ff" />
@@ -731,11 +737,11 @@ await ensureRecordingReady();
     const size =
       variant === "center"
         ? Platform.OS === "web"
-          ? 56
-          : 44
+          ? 65
+          : 55
         : Platform.OS === "web"
-        ? 30
-        : 22;
+        ? 32
+        : 32;
 
     return <MaterialIcons name="graphic-eq" size={size} color="#dcf9ff" />;
   };
@@ -759,6 +765,15 @@ await ensureRecordingReady();
     inputRange: [0, 1],
     outputRange: [0.9, 1],
   });
+
+  const centerExpanded =
+    loading ||
+    isStreaming ||
+    isTranscribing ||
+    recorderState.isRecording ||
+    micPhase !== "idle";
+
+  const inlineExpanded = centerExpanded;
 
   return (
     <KeyboardAvoidingView
@@ -784,15 +799,15 @@ await ensureRecordingReady();
       </View>
 
       {/* TALK output */}
-      {showTalk && (streamedTalk.length > 0 || talk.length > 0) && (
-        <View style={[styles.talkContainer, Platform.OS === "web" && styles.talkContainerWeb]}>
+      {/* {showTalk && (streamedTalk.length >= 0 || talk.length > 0) && ( */}
+        <View style={[styles.talkContainer, Platform.OS === "web" && styles.talkContainerWeb, hintMode === "off" && styles.centerTalk]}>
           <Text style={styles.talkText}>{isStreaming ? streamedTalk : talk}</Text>
         </View>
-      )}
+      {/* )} */}
 
       {/* TEACH scroll */}
       <ScrollView
-        style={[styles.teachScroll, Platform.OS === "web" && styles.teachScrollWeb]}
+        style={[styles.teachScroll, Platform.OS === "web" && styles.teachScrollWeb, hintMode === "off" && styles.hide]}
         contentContainerStyle={styles.teachContent}
       >
         {messages.map((msg) => (
@@ -805,104 +820,32 @@ await ensureRecordingReady();
         ))}
       </ScrollView>
 
-      {/* Center voice button (voice mode only) */}
-      <Animated.View
-        pointerEvents={entryMode === "voice" ? "auto" : "none"}
-        style={[
-          styles.centerMicWrap,
-          {
-            opacity: centerOpacity,
-            transform: [{ scale: centerScale }],
-          },
-        ]}
+      {/* ✅ Center mic extracted */}
+      <CenterMic
+        enabled={entryMode === "voice"}
+        opacity={centerOpacity}
+        scale={centerScale}
+        expanded={centerExpanded}
+        onPress={onPrimaryPress}
       >
-        <Pressable
-          style={[
-            styles.centerMicButton,
-            // Expand when showing text labels (Loading/Ending/END)
-            (loading || isStreaming || isTranscribing || recorderState.isRecording) && styles.centerMicButtonWide,
-          ]}
-          onPress={onPrimaryPress}
-        >
-          {renderPrimaryButtonContent("center")}
-        </Pressable>
-      </Animated.View>
+        {renderPrimaryButtonContent("center")}
+      </CenterMic>
 
-      {/* Bottom bar: Tt | Input+Send | Help */}
-      <View style={[styles.bottomBar, Platform.OS === "web" && styles.bottomBarWeb]}>
-        {/* Tt toggle LEFT */}
-        <Pressable
-          onPress={() => (entryMode === "text" ? goVoiceMode() : goTextMode())}
-          style={styles.modeBtn}
-        >
-          <Text style={{ color: "#dcf9ff", fontWeight: "900" }}>Tt</Text>
-        </Pressable>
-
-        {/* Input bar CENTER (text mode only) */}
-        <Animated.View
-          style={{
-            flex: 1,
-            marginHorizontal: 12,
-            transform: [{ translateX: inputTx }],
-            opacity: inputOpacity,
-          }}
-          pointerEvents={entryMode === "text" ? "auto" : "none"}
-        >
-          <View style={styles.textBar}>
-            <TextInput
-              style={[styles.input, Platform.OS === "web" && styles.inputWeb]}
-              placeholder="Ask Anything"
-              placeholderTextColor={"#8e8e8e"}
-              value={input}
-              onChangeText={setInput}
-              multiline
-            />
-
-            {/* Send button inside the input bar */}
-            <Pressable
-              style={[
-                styles.inlineSendButton,
-                (loading || isStreaming || isTranscribing || recorderState.isRecording) && styles.inlineSendButtonWide,
-              ]}
-              onPress={onPrimaryPress}
-            >
-              {renderPrimaryButtonContent("inline")}
-            </Pressable>
-          </View>
-        </Animated.View>
-
-        {/* Help bar RIGHT */}
-        <View style={styles.helpBarWrap}>
-          <View style={styles.segment}>
-            <Pressable
-              onPress={() => setHintMode("off")}
-              style={[styles.segmentBtn, hintMode === "off" && styles.segmentBtnActive]}
-            >
-              <Text style={[styles.segmentText, hintMode === "off" && styles.segmentTextActive]}>
-                Off
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setHintMode("hint")}
-              style={[styles.segmentBtn, styles.segmentMiddle, hintMode === "hint" && styles.segmentBtnActive]}
-            >
-              <Text style={[styles.segmentText, hintMode === "hint" && styles.segmentTextActive]}>
-                Hint
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setHintMode("tutor")}
-              style={[styles.segmentBtn, hintMode === "tutor" && styles.segmentBtnActive]}
-            >
-              <Text style={[styles.segmentText, hintMode === "tutor" && styles.segmentTextActive]}>
-                Tutor
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
+      {/* ✅ Bottom bar extracted */}
+      <BottomBar
+        entryMode={entryMode}
+        onToggleMode={() => (entryMode === "text" ? goVoiceMode() : goTextMode())}
+        onGoVoiceMode={goVoiceMode}
+        input={input}
+        onChangeInput={setInput}
+        inputTx={inputTx}
+        inputOpacity={inputOpacity}
+        onPrimaryPress={onPrimaryPress}
+        inlineButtonExpanded={inlineExpanded}
+        inlineButtonContent={renderPrimaryButtonContent("inline")}
+        hintMode={hintMode}
+        onHintModeChange={setHintMode}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -930,18 +873,17 @@ const styles = StyleSheet.create({
   logoWeb: { width: 110, height: 60, left: 0, top: 0, resizeMode: "contain" },
   settingsButton: { padding: 6 },
 
-  talkContainer: { marginTop: 48, marginBottom: 10, alignItems: "center" },
+  talkContainer: {  marginTop: 80, marginBottom: 0, paddingBottom: 10, alignItems: "center" },
   talkContainerWeb: {
-    position: "fixed",
+    position: "absolute",
     top: 66,
     width: "100%",
     marginBottom: 0,
     paddingBottom: 10,
     backgroundColor: "#f0f0f000",
-    borderBottomWidth: 1,
-    borderBottomColor: "#ccc",
     marginTop: 0,
     alignItems: "center",
+    marginLeft: -20
   },
   talkText: {
     fontSize: 20,
@@ -949,14 +891,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     maxWidth: "90%",
   },
+  centerTalk: {
+    position: "relative",
+    marginBottom: Platform.OS ==="web" ? 310 : 210,
+    marginLeft: Platform.OS ==="web" ? 0 : undefined,
+  },
 
-  teachScroll: { flex: 1, width: "100%" },
+  
+
+  teachScroll: { flex: 1, width: "100%", marginBottom: -8, marginTop: 0,  },
   teachScrollWeb: {
     top: 50,
     marginTop: 33,
-    marginBottom: 80,
+    marginBottom: 130,
   },
-  teachContent: { paddingHorizontal: 20 },
+  teachContent: { padding: 20 },
   messageBlock: { marginBottom: 16 },
 
   userText: {
@@ -966,115 +915,8 @@ const styles = StyleSheet.create({
     maxWidth: "70%",
     padding: 15,
     borderRadius: 12,
-    backgroundColor: "#6198ba3c",
+    backgroundColor: "#b8e9f7a6",
   },
   teachText: { fontSize: 15, color: "#444", textAlign: "left" },
-
-  // Center mic
-  centerMicWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: "58%",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 50,
-  },
-  centerMicButton: {
-    width: Platform.OS === "web" ? 100 : 80,
-    height: Platform.OS === "web" ? 100 : 80,
-    borderRadius: Platform.OS === "web" ? 70 : 60,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  centerMicButtonWide: {
-    width: 170,
-    borderRadius: 40,
-    paddingHorizontal: 14,
-  },
-
-  // Bottom bar layout
-  bottomBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  bottomBarWeb: {
-    position: "fixed",
-    left: 20,
-    right: 20,
-    bottom: 12,
-  },
-
-  modeBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Text bar
-  textBar: {
-    position: "relative",
-    justifyContent: "center",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#8e8e8e",
-    borderRadius: 40,
-    paddingVertical: 14,
-    paddingLeft: 18,
-    paddingRight: 78, // room for inline send
-    fontSize: 16,
-    minHeight: 48,
-  },
-  inputWeb: {
-    paddingVertical: 16,
-  },
-  inlineSendButton: {
-    position: "absolute",
-    right: 8,
-    top: 6,
-    bottom: 6,
-    width: 44,
-    borderRadius: 24,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  inlineSendButtonWide: {
-    width: 96,
-    borderRadius: 40,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Help bar (right)
-  helpBarWrap: {
-    width: Platform.OS === "web" ? 120 : 140,
-  },
-  segment: {
-    flexDirection: Platform.OS === "web" ? "column" : "row",
-    borderWidth: 1,
-    borderColor: "#8e8e8e",
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  segmentMiddle: Platform.OS === "web"
-    ? { borderTopWidth: 1, borderBottomWidth: 1 }
-    : { borderLeftWidth: 1, borderRightWidth: 1 },
-  segmentBtnActive: { backgroundColor: "#000" },
-  segmentText: { fontSize: 12, fontWeight: "600", color: "#000" },
-  segmentTextActive: { color: "#dcf9ff" },
+  hide: {display:"none"}
 });
