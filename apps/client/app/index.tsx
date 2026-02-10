@@ -37,6 +37,7 @@ import MiniWave from "@/components/chat/MiniWave";
 // ✅ NEW: extracted UI components
 import CenterMic from "@/components/chat/CenterMic";
 import BottomBar from "@/components/chat/BottomBar";
+import { disableDuplexAudioRoute, enableDuplexAudioRoute } from "@/hooks/duplexAudio";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8787";
 const SESSION_ID = process.env.EXPO_PUBLIC_SESSION_ID ?? "local-dev-session";
@@ -122,7 +123,7 @@ export default function HomeScreen() {
     try {
       ttsPlayer.pause?.();
       ttsPlayer.seekTo?.(0);
-    } catch {}
+    } catch { }
 
     try {
       if (currentWebAudioRef.current) {
@@ -130,7 +131,7 @@ export default function HomeScreen() {
         currentWebAudioRef.current.src = "";
         currentWebAudioRef.current = null;
       }
-    } catch {}
+    } catch { }
   };
 
   const stopStreaming = () => {
@@ -154,7 +155,7 @@ export default function HomeScreen() {
 
   // Warm up
   useEffect(() => {
-    fetch(`${API_URL}/ping`).catch(() => {});
+    fetch(`${API_URL}/ping`).catch(() => { });
   }, []);
 
   // Mic permissions + audio mode
@@ -169,8 +170,22 @@ export default function HomeScreen() {
         playsInSilentMode: true,
         allowsRecording: true,
       });
-    })().catch(() => {});
+    })().catch(() => { });
   }, []);
+
+  //Duplex streaming, IOS dev hooks
+  useEffect(() => {
+    if (entryMode === "voice") {
+      enableDuplexAudioRoute();
+    } else {
+      disableDuplexAudioRoute();
+    }
+
+    return () => {
+      disableDuplexAudioRoute();
+    };
+  }, [entryMode]);
+
 
   // Keep TTS queue pumping when native playback ends
   useEffect(() => {
@@ -215,7 +230,7 @@ export default function HomeScreen() {
     stopStreaming();
     try {
       if (recorderState.isRecording) await audioRecorder.stop();
-    } catch {}
+    } catch { }
 
     setMicPhase("idle");
     setEntryMode("text");
@@ -740,8 +755,8 @@ export default function HomeScreen() {
           ? 65
           : 55
         : Platform.OS === "web"
-        ? 32
-        : 32;
+          ? 32
+          : 32;
 
     return <MaterialIcons name="graphic-eq" size={size} color="#dcf9ff" />;
   };
@@ -800,9 +815,9 @@ export default function HomeScreen() {
 
       {/* TALK output */}
       {/* {showTalk && (streamedTalk.length >= 0 || talk.length > 0) && ( */}
-        <View style={[styles.talkContainer, Platform.OS === "web" && styles.talkContainerWeb, hintMode === "off" && styles.centerTalk]}>
-          <Text style={styles.talkText}>{isStreaming ? streamedTalk : talk}</Text>
-        </View>
+      <View style={[styles.talkContainer, Platform.OS === "web" && styles.talkContainerWeb, hintMode === "off" && styles.centerTalk]}>
+        <Text style={styles.talkText}>{isStreaming ? streamedTalk : talk}</Text>
+      </View>
       {/* )} */}
 
       {/* TEACH scroll */}
@@ -873,7 +888,7 @@ const styles = StyleSheet.create({
   logoWeb: { width: 110, height: 60, left: 0, top: 0, resizeMode: "contain" },
   settingsButton: { padding: 6 },
 
-  talkContainer: {  marginTop: 80, marginBottom: 0, paddingBottom: 10, alignItems: "center" },
+  talkContainer: { marginTop: 80, marginBottom: 0, paddingBottom: 10, alignItems: "center" },
   talkContainerWeb: {
     position: "absolute",
     top: 66,
@@ -893,13 +908,13 @@ const styles = StyleSheet.create({
   },
   centerTalk: {
     position: "relative",
-    marginBottom: Platform.OS ==="web" ? 310 : 210,
-    marginLeft: Platform.OS ==="web" ? 0 : undefined,
+    marginBottom: Platform.OS === "web" ? 310 : 210,
+    marginLeft: Platform.OS === "web" ? 0 : undefined,
   },
 
-  
 
-  teachScroll: { flex: 1, width: "100%", marginBottom: -8, marginTop: 0,  },
+
+  teachScroll: { flex: 1, width: "100%", marginBottom: -8, marginTop: 0, },
   teachScrollWeb: {
     top: 50,
     marginTop: 33,
@@ -918,5 +933,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#b8e9f7a6",
   },
   teachText: { fontSize: 15, color: "#444", textAlign: "left" },
-  hide: {display:"none"}
+  hide: { display: "none" }
 });
